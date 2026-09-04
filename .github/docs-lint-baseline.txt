@@ -115,7 +115,6 @@ dead-identifier	docs/reference/kiro-cli/mcp/examples.md	list_branches
 dead-identifier	docs/reference/kiro-cli/mcp/examples.md	read_documentation
 dead-identifier	docs/reference/kiro-cli/mcp/examples.md	search_documentation
 dead-identifier	docs/reference/kiro-cli/mcp/examples.md	search_repositories
-dead-identifier	docs/reference/kiro-cli/mcp/examples.md	update_issue
 dead-identifier	docs/reference/kiro-cli/mcp/oauth-token-storage.md	ascii_serialization
 dead-identifier	docs/reference/kiro-cli/mcp/oauth-token-storage.md	recycle_kiro_sessions
 dead-identifier	docs/reference/kiro-cli/steering.md	kiro_default
@@ -143,7 +142,6 @@ dead-identifier	docs/system-specs/modules/auto-improvement.md	major_outage
 dead-identifier	docs/system-specs/modules/auto-improvement.md	mod_py_sym
 dead-identifier	docs/system-specs/modules/claude-code-provider.md	settingSources
 dead-identifier	docs/system-specs/modules/cloud.md	AuthorizeSecurityGroup
-dead-identifier	docs/system-specs/modules/cloud.md	implicitDeny
 dead-identifier	docs/system-specs/modules/computer-use.md	AddImage
 dead-identifier	docs/system-specs/modules/computer-use.md	AppRepository
 dead-identifier	docs/system-specs/modules/computer-use.md	AppsFolder
@@ -217,7 +215,6 @@ dead-identifier	docs/system-specs/modules/session.md	kiro_session_id
 dead-identifier	docs/system-specs/modules/session.md	resume_session_id
 dead-identifier	docs/system-specs/modules/side.md	steer_prune_terminal
 dead-identifier	docs/system-specs/modules/slack-gateway.md	file_skip
-dead-identifier	docs/system-specs/modules/slack-gateway.md	trust_env
 dead-identifier	docs/system-specs/modules/steering-viewer.md	TestWorkspaceProjectPrecondition
 dead-identifier	docs/system-specs/modules/taskrunner.md	spec_stem
 dead-identifier	src/kiro_crew/apps/builtins/auto_improvement/docs/PORT_PLAN.md	cr_recipe
@@ -257,7 +254,6 @@ line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:23
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:2438
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:2742
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:2807-2820
-line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:3313
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:3313-3332
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:3323
 line-ref	docs/request-for-change/rfc-crew-agent-sdk-boundary.md	acp/client.py:3408
