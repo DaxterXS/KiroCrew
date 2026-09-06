@@ -8,16 +8,22 @@ import type { TurnItem } from '../pages/chat/types'
 // Each mock types only the props it actually reads.
 
 vi.mock('../pages/chat/AssistantMessage', () => ({
-  default: (props: { content: string; isStreaming?: boolean }) => (
-    <div data-testid="assistant-message" data-streaming={String(props.isStreaming)}>
+  default: (props: { content: string; isStreaming?: boolean; onSessionOpen?: (k: string) => void; sessions?: ReadonlyMap<string, string>; activeSession?: string }) => (
+    <div
+      data-testid="assistant-message"
+      data-streaming={String(props.isStreaming)}
+      data-has-session-open={String(!!props.onSessionOpen)}
+      data-has-sessions={String(!!props.sessions)}
+      data-active-session={props.activeSession ?? ''}
+    >
       {props.content}
     </div>
   ),
 }))
 
 vi.mock('../pages/chat/UserMessage', () => ({
-  default: (props: { content: string }) => (
-    <div data-testid="user-message">{props.content}</div>
+  default: (props: { content: string; meta?: Record<string, unknown>; renderContent: (c: string, m: Record<string, unknown> | undefined) => ReactNode }) => (
+    <div data-testid="user-message">{props.renderContent(props.content, props.meta)}</div>
   ),
 }))
 
@@ -57,7 +63,16 @@ vi.mock('../pages/chat/TurnBlock', () => ({
 }))
 
 vi.mock('../components/MarkdownRenderer', () => ({
-  default: ({ content }: { content: string }) => <span data-testid="markdown">{content}</span>,
+  default: ({ content, onSessionOpen, sessions, activeSession }: { content: string; onSessionOpen?: (k: string) => void; sessions?: ReadonlyMap<string, string>; activeSession?: string }) => (
+    <span
+      data-testid="markdown"
+      data-has-session-open={String(!!onSessionOpen)}
+      data-has-sessions={String(!!sessions)}
+      data-active-session={activeSession ?? ''}
+    >
+      {content}
+    </span>
+  ),
 }))
 
 import ChatMessageList from '../app-sdk/ChatMessageList'
@@ -448,5 +463,69 @@ describe('ChatMessageList — batch approval wiring (Req 4.1-4.4)', () => {
       />,
     )
     expect(screen.getByTestId('collapsible-tool-group')).toHaveAttribute('data-has-batch', 'false')
+  })
+})
+
+describe('session-navigation callback threading (#8254)', () => {
+  // The registry stays store-free (#3299): these are host-supplied optional
+  // props, mirroring onFileOpen. When the host wires them, every row that draws
+  // markdown gets them so a /chat?sid= link resolves in place; when the host
+  // wires nothing, the rows fall back to today's external-link behaviour.
+  const sessions = new Map<string, string>([['dashboard_chat-2', 'Other session']])
+  const onSessionOpen = () => {}
+
+  it('forwards onSessionOpen / sessions / activeSession to the user row', () => {
+    render(
+      <ChatMessageList
+        messages={[msg('user', 'see /chat?sid=dashboard_chat-2')]}
+        running={false}
+        onSessionOpen={onSessionOpen}
+        sessions={sessions}
+        activeSession="dashboard_chat-1"
+      />,
+    )
+    const md = screen.getByTestId('markdown')
+    expect(md.getAttribute('data-has-session-open')).toBe('true')
+    expect(md.getAttribute('data-has-sessions')).toBe('true')
+    expect(md.getAttribute('data-active-session')).toBe('dashboard_chat-1')
+  })
+
+  it('forwards the session props to the assistant row', () => {
+    render(
+      <ChatMessageList
+        messages={[msg('user', 'q'), msg('assistant', 'a')]}
+        running={false}
+        onSessionOpen={onSessionOpen}
+        sessions={sessions}
+        activeSession="dashboard_chat-1"
+      />,
+    )
+    const asst = screen.getByTestId('assistant-message')
+    expect(asst.getAttribute('data-has-session-open')).toBe('true')
+    expect(asst.getAttribute('data-has-sessions')).toBe('true')
+    expect(asst.getAttribute('data-active-session')).toBe('dashboard_chat-1')
+  })
+
+  it('forwards the session props to a note / inject row', () => {
+    render(
+      <ChatMessageList
+        messages={[msg('inject', 'Injected /chat?sid=dashboard_chat-2')]}
+        running={false}
+        onSessionOpen={onSessionOpen}
+        sessions={sessions}
+        activeSession="dashboard_chat-1"
+      />,
+    )
+    const md = screen.getByTestId('markdown')
+    expect(md.getAttribute('data-has-session-open')).toBe('true')
+    expect(md.getAttribute('data-has-sessions')).toBe('true')
+  })
+
+  it('leaves rows without session props when the host wires nothing (negative control)', () => {
+    render(<ChatMessageList messages={[msg('user', 'plain')]} running={false} />)
+    const md = screen.getByTestId('markdown')
+    expect(md.getAttribute('data-has-session-open')).toBe('false')
+    expect(md.getAttribute('data-has-sessions')).toBe('false')
+    expect(md.getAttribute('data-active-session')).toBe('')
   })
 })

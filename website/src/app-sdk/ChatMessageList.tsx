@@ -50,6 +50,14 @@ export interface ChatMessageListProps {
    *  (#5400, #5434). */
   canTrust?: boolean
   onFileOpen?: (path: string, opts?: { line?: number; endLine?: number }) => void
+  /** Host-supplied session switch for a `/chat?sid=<slot-key>` link in any row
+   *  this list draws. A prop rather than a store read so the component stays
+   *  dependency-free for the embed SDK (#3299); the dashboard host passes its
+   *  `selectSessionTab` + roster, and a host that omits these gets today's
+   *  behaviour — the link opens a new browser tab. */
+  onSessionOpen?: (key: string) => void
+  sessions?: ReadonlyMap<string, string>
+  activeSession?: string
   /** Optional host-injected renderer for tool messages (role 'tool'/'tool_call'/
    *  'tool_result'). Lets a Redux-connected host (e.g. the dashboard's split-view
    *  ChatPane) render the full slot-aware ToolCallLine while this component stays
@@ -81,6 +89,9 @@ const ChatMessageList = memo(function ChatMessageList({
   onApproveBatch,
   canTrust,
   onFileOpen,
+  onSessionOpen,
+  sessions,
+  activeSession,
   renderTool,
   hideCardOwnedOAuth = false,
   renderers,
@@ -186,6 +197,9 @@ const ChatMessageList = memo(function ChatMessageList({
       running,
       key,
       onFileOpen,
+      onSessionOpen,
+      sessions,
+      activeSession,
       hideCardOwnedOAuth,
       autoDeniedIds,
       renderTool,
@@ -193,7 +207,7 @@ const ChatMessageList = memo(function ChatMessageList({
       row,
     }
     return entry.render(m, ctx)
-  }, [messages, running, contentWidth, onFileOpen, renderTool, autoDeniedIds, hideCardOwnedOAuth, activeRenderers])
+  }, [messages, running, contentWidth, onFileOpen, onSessionOpen, sessions, activeSession, renderTool, autoDeniedIds, hideCardOwnedOAuth, activeRenderers])
 
 
   // Render a TurnItem (single or group)

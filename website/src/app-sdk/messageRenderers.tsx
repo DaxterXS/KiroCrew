@@ -55,6 +55,17 @@ export interface MessageRenderContext {
   /** Stable React key the list computed for this row. */
   key: string
   onFileOpen?: (path: string, opts?: { line?: number; endLine?: number }) => void
+  /** Host-supplied session switch for a `/chat?sid=<slot-key>` link. Same shape
+   *  as `onFileOpen`: the host provides the capability, the registry stays
+   *  store-free (#3299), and a host that omits it gets today's behaviour — the
+   *  link falls through to an external tab. Threaded to every row that renders
+   *  markdown so a session chip resolves in place instead of opening a new tab. */
+  onSessionOpen?: (key: string) => void
+  /** Slot-key → title roster the host knows. Absent (not empty) means the host
+   *  never wired it, so `resolveSessionChip` leaves the link external. */
+  sessions?: ReadonlyMap<string, string>
+  /** The currently active slot key. A link naming it stays inert. */
+  activeSession?: string
   /** Drop mcp_oauth banners a Connections card already owns. */
   hideCardOwnedOAuth: boolean
   /** tool_call_ids whose call a policy or hook blocked. */
@@ -79,7 +90,15 @@ export interface MessageRenderer {
   render: (m: ChatMessage, ctx: MessageRenderContext) => React.ReactNode
 }
 
-function renderUserContent(content: string, meta: Record<string, unknown> | undefined): React.ReactNode {
+/** Host-supplied session-navigation props, forwarded verbatim to MarkdownRenderer.
+ *  All optional: a host that wires none gets today's external-link behaviour. */
+interface SessionRenderActions {
+  onSessionOpen?: (key: string) => void
+  sessions?: ReadonlyMap<string, string>
+  activeSession?: string
+}
+
+function renderUserContent(content: string, meta: Record<string, unknown> | undefined, session?: SessionRenderActions): React.ReactNode {
   // History load re-serves the fully-EXPANDED paste content alongside
   // meta.pastes. Handing a large paste (hundreds of KB / tens of thousands of
   // lines) straight to MarkdownRenderer parses + lays it out on the main thread
@@ -113,7 +132,7 @@ function renderUserContent(content: string, meta: Record<string, unknown> | unde
       return <MessageErrorBoundary rawContent={text}>{out}</MessageErrorBoundary>
     }
   }
-  return <MessageErrorBoundary rawContent={content}><MarkdownRenderer content={content} /></MessageErrorBoundary>
+  return <MessageErrorBoundary rawContent={content}><MarkdownRenderer content={content} onSessionOpen={session?.onSessionOpen} sessions={session?.sessions} activeSession={session?.activeSession} /></MessageErrorBoundary>
 }
 
 /**
@@ -391,7 +410,7 @@ export const defaultMessageRenderers: readonly MessageRenderer[] = [
         meta={m.meta}
         timestamp={formatTs(m.ts)}
         timestampTitle={fmtMessageTimeFull(m.ts)}
-        renderContent={renderUserContent}
+        renderContent={(content, meta) => renderUserContent(content, meta, { onSessionOpen: ctx.onSessionOpen, sessions: ctx.sessions, activeSession: ctx.activeSession })}
       />,
       true,
     ),
@@ -430,6 +449,9 @@ export const defaultMessageRenderers: readonly MessageRenderer[] = [
             showFooter={showFooter}
             slotRunning={ctx.running}
             onFileOpen={ctx.onFileOpen}
+            onSessionOpen={ctx.onSessionOpen}
+            sessions={ctx.sessions}
+            activeSession={ctx.activeSession}
             variants={m.variants}
             variantIdx={m.variant_idx}
             turnStats={(m.meta as Record<string, unknown> | undefined)?.turn_stats as TurnStats | undefined}
@@ -471,7 +493,7 @@ export const defaultMessageRenderers: readonly MessageRenderer[] = [
         <>
           {cronLabel && <span className="text-muted text-[11px] leading-4 font-medium px-1 mb-1"><Clock size={11} className="inline mr-0.5" />{cronLabel}</span>}
           <div className="msg-content px-4 py-3 text-sm leading-6 rounded-lg bg-warn-subtle text-text ring-1 ring-inset forced-colors:border ring-warn/30 rounded-bl-[4px] overflow-hidden min-w-0" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-            <MessageErrorBoundary rawContent={cleanContent}><MarkdownRenderer content={cleanContent} softBreaks /></MessageErrorBoundary>
+            <MessageErrorBoundary rawContent={cleanContent}><MarkdownRenderer content={cleanContent} softBreaks onSessionOpen={ctx.onSessionOpen} sessions={ctx.sessions} activeSession={ctx.activeSession} /></MessageErrorBoundary>
           </div>
         </>,
       )
