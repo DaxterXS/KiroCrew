@@ -1190,6 +1190,14 @@ async def create_session(
         #   operator withheld session trust and granted single commands instead,
         #   which is exactly the case that must keep asking. So the child starts
         #   with `_ChatSlot.__init__`'s empty set and earns its own grants.
+        #
+        # * `_trusted_write_grants` -- NOT inherited, for the same reason and by
+        #   the same mechanism (the child gets `__init__`'s empty set). A path
+        #   grant is judged against the file the operator was LOOKING at; a
+        #   dispatched worker writes files they have not seen, so carrying the
+        #   grant would admit writes inside a directory that were never asked
+        #   about. This is the tier where that matters MOST: a directory grant
+        #   covers files that do not exist yet.
         # * `_trust_scope` -- NOT inherited. It names a TTL-bounded, SEL-audited
         #   `SafetyOverride` grant that is re-checked on every approval; forking
         #   the key would hand a second session a credential whose revocation

@@ -214,6 +214,16 @@ export const UNATTENDED_APPROVAL_SOURCES = new Set(['cron', 'heartbeat', 'taskru
  *  point where repeated prompting reads as friction rather than safety. */
 const APPROVAL_NUDGE_THRESHOLD = 3
 
+/** Approval decisions that grant something DURABLE to the slot rather than
+ *  answering one call, and therefore go to the slot-scoped approve endpoint.
+ *  The `trust_path_*` tiers are the fs-write path scopes (GitHub #938); the
+ *  backend's own list is `chat_handlers._DURABLE_TRUST_ACTIONS`, plus
+ *  `trust_reads`, which grants a classification rather than a scope. */
+const SLOT_GRANT_DECISIONS = [
+  'trust_command', 'trust_base', 'trust', 'trust_reads',
+  'trust_path_file', 'trust_path_dir', 'trust_path_ws',
+]
+
 // Pending-approval selection is slot-aware — see selectSlotPendingApproval
 // in chatSlice: each grid pane's approval bar reflects ITS slot.
 
@@ -1016,6 +1026,13 @@ function ChatInput({
   // never be promoted into grant authority by a frontend fallback.
   const approvalTrustCommandGrantable = approvalMeta?.trust_command_grantable === '1'
   const approvalTrustBaseGrantable = approvalMeta?.trust_base_grantable === '1'
+  // Path-scoped write scopes (GitHub #938). Read straight off the pending card
+  // and never re-derived: the root the gateway put here is the one it will
+  // accept back, so computing a directory locally would only produce a value the
+  // backend rejects. An absent root means that tier was withheld server-side.
+  const approvalWriteFileRoot = (approvalMeta?.write_file_root as string) || ''
+  const approvalWriteDirRoot = (approvalMeta?.write_dir_root as string) || ''
+  const approvalWriteWorkspaceRoot = (approvalMeta?.write_ws_root as string) || ''
   /** Sources that run with no human attached to THIS conversation. Session
    *  trust means "auto-approve tools for this chat session", which is
    *  incoherent for an unattended job: the job is not this session, so the
@@ -1041,6 +1058,24 @@ function ChatInput({
    *  - `!approvalIsUnattended`: session trust is incoherent for a job that is
    *    not this session (see `approvalSource` above). */
   const approvalTrustGrantable = !!activeSlot && !approvalIsUnattended
+  // A write card carries no command, so `trust_command_grantable` is absent for
+  // it and the command-gated condition below would hide the menu entirely --
+  // which is the whole of #938. Open the gate on either family, and let each
+  // tier's own flag decide what appears inside. Gated on
+  // `approvalTrustGrantable` like every other Trust control: an unattended
+  // (cron/taskrunner) card must not show durable tiers that
+  // `handleApprovalAction` would silently downgrade to a one-shot approval.
+  const approvalHasWriteScopes = approvalTrustGrantable
+    && !!(approvalWriteFileRoot || approvalWriteDirRoot || approvalWriteWorkspaceRoot)
+  const approvalCommandTrust = approvalTrustGrantable && approvalTrustCommandGrantable
+  // A write-ONLY card is a new row shape, and AUTOSDE's max-two-buttons-per-row
+  // legacy-exempts the existing three-control command row "but must not grow":
+  // adding the Trust menu as a third sibling next to Allow once + Reject would
+  // grow it. So on a write-only card the Trust menu absorbs the reject tiers
+  // (one trigger is one control) and the standalone Reject dropdown is not
+  // rendered -- the row stays at two controls. A command card keeps its
+  // legacy-exempt shape untouched.
+  const approvalWriteOnlyCard = approvalHasWriteScopes && !approvalCommandTrust
   const simplified = useSimplifiedToolNames()
   const uiLang = useLanguage().resolved
   const approvalLabelRaw = sanitizeLlmOutput(pendingApproval?.content || '').replace(/^🔧\s*/, '')
@@ -1141,7 +1176,11 @@ function ChatInput({
       setApprovalNoticeKind('error')
       setApprovalNotice(i18nT('components.chatInput.could_not_submit_that_decision_see_the_console_f'))
     }
-    if (['trust_command', 'trust_base', 'trust', 'trust_reads'].includes(decision) && activeSlot) {
+    // Every decision that WIDENS the slot goes to the slot-scoped grant
+    // endpoint; anything else is a one-shot answer. A path tier missing from
+    // this list would silently fall to `resolveApproval`, which knows no
+    // grants -- the click would look like it worked and grant nothing.
+    if (SLOT_GRANT_DECISIONS.includes(decision) && activeSlot) {
       // Defence in depth: the Trust controls are not rendered for unattended
       // sources, but never let a trust grant be applied on their behalf. The
       // grant would land on THIS slot (api.approveChatSlot is slot-scoped),
@@ -3435,22 +3474,33 @@ function ChatInput({
                   <div className="flex gap-1.5 flex-wrap items-center">
                       <button disabled={approvalSubmitting} className={approvalBtnClass} onClick={() => handleApprovalAction('approved')}><CheckCircle size={12} className="shrink-0" />{i18nT('components.chatInput.allow_once')}</button>
                       {approvalIsReadOnly && approvalTrustGrantable && <button disabled={approvalSubmitting} className={approvalBtnClass} onClick={() => handleApprovalAction('trust_reads')}><BookOpen size={12} className="shrink-0" />{i18nT('components.chatInput.trust_reads')}</button>}
-                      {approvalTrustGrantable && approvalTrustCommandGrantable && (
+                      {(approvalCommandTrust || approvalHasWriteScopes) && (
                         <TrustDropdown
                             fullCommand={approvalFullCommand}
                             baseCommand={approvalBaseCommand}
                             isShell={approvalIsShell && approvalTrustBaseGrantable}
-                            hasCommand={approvalTrustCommandGrantable}
+                            hasCommand={approvalCommandTrust}
+                            // The broad tier rides on the SAME server proof as the
+                            // command tiers -- the gateway sets `trust_grantable`
+                            // and `trust_command_grantable` together -- so a write
+                            // card, which carries neither, must not show it. Opening
+                            // the menu for path scopes would otherwise render a
+                            // button the backend refuses.
+                            allowTrustAll={approvalCommandTrust}
+                            writeFileRoot={approvalWriteFileRoot}
+                            writeDirRoot={approvalWriteDirRoot}
+                            writeWorkspaceRoot={approvalWriteWorkspaceRoot}
+                            includeReject={approvalWriteOnlyCard}
                             disabled={approvalSubmitting}
                             className={approvalBtnClass}
                             onAction={(action, pattern) => { handleApprovalAction(action, pattern) }}
                         />
                       )}
-                      <RejectDropdown
+                      {!approvalWriteOnlyCard && <RejectDropdown
                           disabled={approvalSubmitting}
                           className={`${approvalBtnClass} hover:!text-danger hover:!bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]`}
                           onAction={(action) => { handleApprovalAction(action) }}
-                      />
+                      />}
                   </div>
               </div>
               {/* A1 discoverability hint: points at the footer mode picker so a

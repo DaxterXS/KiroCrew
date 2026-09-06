@@ -2663,9 +2663,13 @@
       "prefill_hint": "Opening the issue pre-fills the details — then drag the zip into it."
     },
     "trustDropdown": {
+      "options": "Options",
       "trust_all_base": "Trust all <mono>{{base}}</mono> commands",
       "trust_all_tools_channel": "Trust all tools in this channel — persists across restarts",
-      "trust_this_command": "Trust “<mono>{{cmd}}</mono>”"
+      "trust_this_command": "Trust “<mono>{{cmd}}</mono>”",
+      "trust_write_dir": "Trust writes in and under this folder: <mono>{{path}}</mono>",
+      "trust_write_file": "Trust writes to this file: <mono>{{path}}</mono>",
+      "trust_write_workspace": "Trust writes anywhere under this workspace: <mono>{{path}}</mono>"
     },
     "searchableSelect": {
       "no_matches": "No matches",

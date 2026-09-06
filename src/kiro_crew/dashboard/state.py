@@ -87,6 +87,7 @@ from kiro_crew.release_channel import channel as _release_channel_of_build
 from kiro_crew.safety_override import cached_disabled_approval_modes, safety_override
 from kiro_crew.security import redact_credentials, redact_exfiltration_urls
 from kiro_crew.sel import sel
+from kiro_crew.trust_paths import WriteGrant
 
 if TYPE_CHECKING:
     from kiro_crew.dashboard._types import (  # noqa: F401
@@ -3243,6 +3244,7 @@ class _ChatSlot:
         "_trust_scope",
         "_trust_reads",
         "_trusted_patterns",
+        "_trusted_write_grants",
         "_titled",
         "_title_origin",
         "_title_epoch",
@@ -3478,6 +3480,14 @@ class _ChatSlot:
         self._trust_scope: str = ""
         self._trust_reads: bool = False  # auto-approve read-only bash commands
         self._trusted_patterns: set[str] = set()  # session-scoped fnmatch globs
+        # Session-scoped PATH grants for file-write tools (GitHub #938): a set
+        # of ``(tool identity, real root, subtree?)`` triples, matched by
+        # explicit path containment rather than by the fnmatch language above --
+        # see ``kiro_crew.trust_paths`` for why the two stores cannot be one.
+        # Same lifetime and same non-inheritance rule as ``_trusted_patterns``:
+        # not persisted across a restart and not copied to a spawned subagent,
+        # both of which are #1194's ground rather than this store's.
+        self._trusted_write_grants: set[WriteGrant] = set()
         self._titled: bool = False  # True once a title has been assigned
         # Provenance of the current title: "auto" (LLM auto-titler or its
         # fallback) or "user" (manual rename). Governs the background title

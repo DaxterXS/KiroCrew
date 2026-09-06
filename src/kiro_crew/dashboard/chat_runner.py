@@ -271,6 +271,7 @@ from kiro_crew.sel import sel
 from kiro_crew.session import SessionClosingError, SpeculativeResumeRefused
 from kiro_crew.slack.handler import post_linked_approval, resolve_linked_approval
 from kiro_crew.slack.outbound import PostedOptions
+from kiro_crew.trust_paths import derive_write_grant_offer, match_write_grant
 from kiro_crew.trust_patterns import (  # noqa: F401 -- compatibility re-export
     _mask_quoted_separators,
     approval_command,
@@ -539,6 +540,26 @@ def _redact_display_text(text: str) -> str:
     text, _ = redact_exfiltration_urls(text)
     text, _ = redact_credentials(text)
     return text
+
+
+def _write_offer_is_displayable(offer: dict[str, str]) -> bool:
+    """True when every PATH in a write-grant offer survives redaction unchanged.
+
+    A path the redactors rewrite is a path the user cannot read, so it cannot be
+    consented to -- the label would show a masked string while the grant covered
+    the unmasked one. The whole offer is dropped rather than the offending tier,
+    because the tiers are nested: the same bytes appear in the file root, its
+    directory and the project root, so a masked segment taints all of them.
+
+    ``write_tool_key`` is skipped: it is hex-encoded identity, never a path, and
+    contains nothing a redactor recognises.
+    """
+    for key, value in offer.items():
+        if key == "write_tool_key":
+            continue
+        if _redact_display_text(value) != value:
+            return False
+    return True
 
 
 def _redacted_hook_block(event: Any, pre_hook_results: Any) -> tuple[str, str]:
@@ -8786,6 +8807,87 @@ async def _run_chat(
                             metadata={"reason": "trusted_pattern", "pattern": matched},
                         )
                         continue
+                # Path-scoped write grants (GitHub #938): earlier in this
+                # session the user granted THIS tool one file, one directory, or
+                # the project directory.  Matching is explicit path containment
+                # on realpaths (see ``kiro_crew.trust_paths``), not the fnmatch
+                # language the pattern tier above uses -- that matcher folds
+                # case and splits on shell separators, either of which would
+                # widen a path grant past what its label said.
+                #
+                # Same fail-closed gates as the pattern tier, plus trusted
+                # provenance for the params AND the identity: here the target
+                # path IS the matched input, so an agent-authored inline params
+                # dict or an unverified tool identity must never satisfy a
+                # grant.  A miss costs one interactive prompt.
+                if (
+                    slot._trusted_write_grants
+                    and not _child_low_fidelity
+                    and not event.tool_input_redacted
+                    and event.raw_params_trusted
+                    and event.mcp_identity_trusted
+                    and isinstance(event.raw_tool_params, dict)
+                ):
+                    _write_grant = await asyncio.to_thread(
+                        match_write_grant,
+                        tool_kind=event.tool_kind,
+                        raw_params=event.raw_tool_params,
+                        tool_name=event.tool_name,
+                        mcp_server_name=event.mcp_server_name,
+                        grants=set(slot._trusted_write_grants),
+                    )
+                    if _write_grant:
+                        try:
+                            _validate_tool_name(event.title, is_shell=event.is_shell)
+                        except ValueError as e:
+                            await _reject_invalid_tool(
+                                client,
+                                slot,
+                                event,
+                                session_key=session_key,
+                                error=e,
+                                refusal_notices=_refusal_notices,
+                                state=state,
+                                metadata={
+                                    "reason": "invalid_tool_name",
+                                    "scope": "trusted_write_path",
+                                },
+                                refusal_reasons=_refusal_reasons,
+                            )
+                            continue
+                        await client.approve_tool(event.request_id)
+                        _tool_title = _redact_display_text(_broadcast_auto_tool(state, slot, event))
+                        slot.append(
+                            "tool",
+                            f"🔧 {_tool_title}",
+                            "msg msg-tool",
+                            meta=(
+                                {
+                                    "tool_call_id": event.tool_call_id,
+                                    "purpose": redact_and_truncate(event.tool_purpose or "", 200),
+                                }
+                                if event.tool_call_id
+                                else None
+                            ),
+                        )
+                        sel().log_tool_invocation(
+                            session_key=session_key,
+                            agent=slot.agent or "kirocrew",
+                            source="dashboard",
+                            tool_name=_tool_title,
+                            tool_kind=event.tool_kind,
+                            outcome="auto_approved",
+                            request_id=event.request_id,
+                            # The ROOT, not the target: the root is the operator's
+                            # own consented scope, and an auditor reading this row
+                            # needs to know which grant was spent.
+                            metadata={
+                                "reason": "trusted_write_path",
+                                "root": _write_grant.root,
+                                "subtree": "1" if _write_grant.subtree else "",
+                            },
+                        )
+                        continue
                 # Trust-reads: auto-approve read-only bash commands
                 # Detect bash tools by tool_input content (title is human-readable)
                 cmd = _extract_bash_command(event.tool_input) if event.tool_input else ""
@@ -9086,6 +9188,40 @@ async def _run_chat(
                 if _command_grantable and _base and _safe_base == _base:
                     perm_meta["base_command"] = _safe_base
                     perm_meta["trust_base_grantable"] = "1"
+                # Path-scoped write tiers (GitHub #938).  A file-write tool
+                # carries a target PATH and no command, so every command tier
+                # above is withheld for it and the card offers only allow-once
+                # or the broadest "trust all tools".  Derive the three path
+                # roots instead -- this file, its directory, the session's
+                # project -- from the tool's REAL arguments and its canonical
+                # identity, never from the model-authored title.
+                #
+                # Gated on trusted PROVENANCE for both halves: the params must
+                # have come from the preceding tool_call's cache
+                # (``raw_params_trusted``) rather than the permission frame's
+                # agent-authored inline fallback, and the identity from
+                # ``_meta.kiro`` (``mcp_identity_trusted``).  Without both, the
+                # path a grant would later be measured against is text the
+                # model wrote, and the grant would be for a file the user never
+                # saw.  Redacted input is refused for the same reason the
+                # command tiers refuse it: hidden bytes are not consentable.
+                if (
+                    not event.is_shell
+                    and not event.tool_input_redacted
+                    and event.raw_params_trusted
+                    and event.mcp_identity_trusted
+                    and isinstance(event.raw_tool_params, dict)
+                ):
+                    _write_offer = await asyncio.to_thread(
+                        derive_write_grant_offer,
+                        tool_kind=event.tool_kind,
+                        raw_params=event.raw_tool_params,
+                        tool_name=event.tool_name,
+                        mcp_server_name=event.mcp_server_name,
+                        project=slot.project,
+                    )
+                    if _write_offer and _write_offer_is_displayable(_write_offer):
+                        perm_meta.update(_write_offer)
                 slot.append(
                     "permission",
                     f"{_child_lf_warning}{_safe_title}" if _child_lf_warning else _safe_title,

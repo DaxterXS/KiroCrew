@@ -7447,11 +7447,15 @@
       "show_full_command": "সম্পূর্ণ কমান্ড দেখান"
     },
     "trustDropdown": {
+      "options": "অপশন",
       "trust": "বিশ্বাস করুন",
       "trust_all_base": "সব <mono>{{base}}</mono> কমান্ড বিশ্বাস করুন",
       "trust_all_tools": "সব টুল বিশ্বাস করুন",
       "trust_all_tools_channel": "এই চ্যানেলের সব টুল বিশ্বাস করুন — রিস্টার্টের পরেও বজায় থাকে",
-      "trust_this_command": "«<mono>{{cmd}}</mono>» বিশ্বাস করুন"
+      "trust_this_command": "«<mono>{{cmd}}</mono>» বিশ্বাস করুন",
+      "trust_write_dir": "এই ফোল্ডার ও এর ভিতরে লেখায় বিশ্বাস করুন: <mono>{{path}}</mono>",
+      "trust_write_file": "এই ফাইলে লেখায় বিশ্বাস করুন: <mono>{{path}}</mono>",
+      "trust_write_workspace": "এই ওয়ার্কস্পেসের অধীনে যেকোনো জায়গায় লেখায় বিশ্বাস করুন: <mono>{{path}}</mono>"
     },
     "tunnelStatus": {
       "connected": "সংযুক্ত",

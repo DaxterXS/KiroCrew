@@ -1677,6 +1677,48 @@ becoming broad globs. Command parsing and matching live in the shared
 API instead of importing dashboard runner internals or fabricating a
 `Running: ...` title.
 
+**Path-scoped write trust** (`trust_paths.py`, GitHub #938): a file-WRITE tool
+carries a target path, not a command, so its trust tiers cannot live in the
+fnmatch pattern store (`_tool_matches` folds case; `split_command_segments`
+splits on bytes that are legal in filenames). A write approval card instead
+offers up to three path tiers, narrowest first:
+
+| Decision | Grant |
+|----------|-------|
+| `trust_path_file` | that exact realpath only (`subtree=False`) |
+| `trust_path_dir` | the file's own directory and everything below it |
+| `trust_path_ws` | the session's project directory and everything below it |
+
+Grants are stored per-slot as `WriteGrant(tool_key, root, subtree)` triples in a
+second store (`slot._trusted_write_grants`), session-scoped like
+`_trusted_patterns`, never persisted, and not inherited by subagents.
+`tool_key` is `fswrite-trust:v2:<hex(server)>:<hex(tool)>` — components
+hex-encoded **exactly as given** (no case folding, unlike the command tier's
+key), so two case-distinct tools never share a grant. Matching is explicit
+containment on realpaths of BOTH the target and its directory (leaf-symlink and
+linked-ancestor escapes each need their own check); there is no wildcard
+language. A multi-hard-linked regular file fails `_resolve` closed — no offer,
+no match — because `realpath` cannot see an inode's other names. What
+classifies a request as a file write in the first place is the
+provenance-verified `_meta.kiro` identity checked against the write-ONLY
+builtins derived from governance's `BUILTIN_TOOL_SCOPES` (scope tuple exactly
+`("filesystem.write",)` — today `fs_write`; `code` is excluded because it also
+shells out). The backend-authored `toolCall.kind` is a consistency check that
+can only withhold a tier, never grant one: keying classification on it would
+let a destructive tool forge `kind: "edit"` to mint and later spend a durable
+path grant. MCP tools never qualify — nothing provenance-verified says what an
+arbitrary MCP tool does with a `path` argument — so they stay on the
+interactive prompt. Offers are
+derived server-side (`derive_write_grant_offer`) onto the pending card as
+`write_tool_key` + `write_file_root` / `write_dir_root` / `write_ws_root`; a
+tier whose root cannot be honestly named (filesystem root, project not
+containing the target, a root the redactors would rewrite) is withheld. The
+client's `pattern` is consent proof, not authority: the handler stores only its
+own server-derived root, read exclusively through the
+`WRITE_GRANT_DECISIONS` decision table, and a state-level approval (no owning
+slot) cannot mint a path grant. Persistence and a review/revoke UI are
+deliberately out of scope (#1194).
+
 **Child-fidelity split: identity vs arguments.** A backend-subagent permission
 event whose structured params never reached the tool_call cache is low-fidelity
 (`AcpEvent.child_low_fidelity`) and is excluded from every content-matching

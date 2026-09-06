@@ -137,6 +137,7 @@ from kiro_crew.security import (
 )
 from kiro_crew.sel import SecurityEvent, sel
 from kiro_crew.session_summary import count_user_turns_in_records
+from kiro_crew.trust_paths import WRITE_GRANT_DECISIONS, WriteGrant
 from kiro_crew.trust_patterns import (
     base_consent_pattern,
     base_trust_patterns,
@@ -9132,6 +9133,20 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "mode": mode})
 
 
+#: Every approval decision that WIDENS the slot durably rather than answering
+#: one call. Each must be refused when the pending future is state-level (no
+#: owning slot, so no canonical card and no scoped store): falling through to
+#: ``resolve_state_approval`` as a plain ``True`` would run the tool having
+#: skipped every scope check. Derived from the path-decision table so a new
+#: path tier cannot be added without inheriting this guard.
+_DURABLE_TRUST_ACTIONS: tuple[str, ...] = (
+    "trust",
+    "trust_command",
+    "trust_base",
+    *WRITE_GRANT_DECISIONS,
+)
+
+
 def _get_pattern_from_pending(slot: _ChatSlot, request_id: str, field: str) -> str:
     """Extract a pattern field from the permission message matching request_id."""
     if not request_id:
@@ -9186,7 +9201,15 @@ def _deny_approval_mode(
 
 
 def _deny_trust_pattern(name: str, request_id: str, action: str, code: str) -> web.Response:
-    """Refuse and audit a command-scoped trust grant without resolving it."""
+    """Refuse and audit a scope-bound trust grant without resolving it.
+
+    Covers both grant families: the command-scoped tiers
+    (``trust_command`` / ``trust_base``) and the path-scoped write tiers
+    (``trust_path_*``, GitHub #938). The path codes are separate rather than
+    reusing the command ones so a refusal names the scope the client actually
+    asked for -- an operator reading a denial should not be told the pending
+    tool has no grantable COMMAND when they clicked a directory.
+    """
     try:
         sel().log_api_access(
             caller=f"dashboard:{name}",
@@ -9202,6 +9225,9 @@ def _deny_trust_pattern(name: str, request_id: str, action: str, code: str) -> w
         "pattern_underivable": "the pending tool has no grantable command scope",
         "approval_superseded": "pattern does not match the pending command",
         "approval_not_slot_owned": "command-scoped trust requires a live slot approval",
+        "path_required": "root path required for path-scoped trust",
+        "path_underivable": "the pending tool has no grantable path scope",
+        "path_superseded": "root does not match the pending write target",
     }
     return web.json_response({"error": errors[code], "code": code}, status=400)
 
@@ -9221,6 +9247,13 @@ async def api_chat_slot_approve(request: web.Request) -> web.Response:
         return body_err
     assert body is not None  # read_bounded_json returns (dict, None) on success
     action = body.get("action", "rejected")
+    # A non-string action names no decision.  The == branches below already
+    # treated one as "no match" (falling through to the reject path), but the
+    # WRITE_GRANT_DECISIONS branch is a dict-membership test, and an unhashable
+    # value ([], {}) would raise TypeError there — a 500 with the approval
+    # unresolved.  Normalize once here so every branch sees the same reject.
+    if not isinstance(action, str):
+        action = "rejected"
     original_action = action
     request_id = body.get("request_id", "")
     # Locate the slot that OWNS the pending approval future. It is usually the
@@ -9264,7 +9297,7 @@ async def api_chat_slot_approve(request: web.Request) -> web.Response:
     # that would approve the tool after skipping every scope check.  Truly
     # missing IDs retain the 404 from the common fallback below; this explicit
     # denial covers a live state owner.
-    if original_action in ("trust", "trust_command", "trust_base") and (not fut or fut.done()):
+    if original_action in _DURABLE_TRUST_ACTIONS and (not fut or fut.done()):
         state_fut = state._approval_futures.get(request_id) if request_id else None
         if state_fut and not state_fut.done():
             return _deny_trust_pattern(name, request_id, original_action, "approval_not_slot_owned")
@@ -9333,6 +9366,30 @@ async def api_chat_slot_approve(request: web.Request) -> web.Response:
             if pattern != base_consent_pattern(base):
                 return _deny_trust_pattern(name, request_id, original_action, "approval_superseded")
             owner._trusted_patterns.update(base_trust_patterns(base))
+        action = "approved"
+    # Trust-path: a PATH grant for a file-write tool (GitHub #938). The root is
+    # read only from the pending card's own server-derived field, addressed by a
+    # decision name that is fixed in ``WRITE_GRANT_DECISIONS`` -- so a client can
+    # neither name a field the tier was not built for nor supply a root of its
+    # own. The body ``pattern`` is CONSENT PROOF only: it must equal the root the
+    # card displayed, which makes a click on a superseded card fail closed
+    # instead of granting a scope the user never read.
+    elif action in WRITE_GRANT_DECISIONS:
+        if fut and not fut.done():
+            root_field, subtree = WRITE_GRANT_DECISIONS[action]
+            pattern = body.get("pattern", "")
+            root = _get_pattern_from_pending(owner, request_id, root_field)
+            tool_key = _get_pattern_from_pending(owner, request_id, "write_tool_key")
+            if not isinstance(pattern, str) or not pattern:
+                return _deny_trust_pattern(name, request_id, original_action, "path_required")
+            if not root or not tool_key:
+                return _deny_trust_pattern(name, request_id, original_action, "path_underivable")
+            if pattern != root:
+                return _deny_trust_pattern(name, request_id, original_action, "path_superseded")
+            # The grant carries the TOOL identity, not just the root: it means
+            # "this tool may write here", so it can never be spent by a
+            # different tool that merely also takes a path argument.
+            owner._trusted_write_grants.add(WriteGrant(tool_key, root, subtree))
         action = "approved"
     # YOLO: auto-approve all tools globally (all slots)
     elif action == "yolo":

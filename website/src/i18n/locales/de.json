@@ -7447,11 +7447,15 @@
       "show_full_command": "Vollständigen Befehl anzeigen"
     },
     "trustDropdown": {
+      "options": "Optionen",
       "trust": "Vertrauen",
       "trust_all_base": "Allen <mono>{{base}}</mono>-Befehlen vertrauen",
       "trust_all_tools": "Allen Werkzeugen vertrauen",
       "trust_all_tools_channel": "Allen Werkzeugen in diesem Kanal vertrauen — bleibt nach Neustarts bestehen",
-      "trust_this_command": "„<mono>{{cmd}}</mono>“ vertrauen"
+      "trust_this_command": "„<mono>{{cmd}}</mono>“ vertrauen",
+      "trust_write_dir": "Schreibzugriffen in und unter diesem Ordner vertrauen: <mono>{{path}}</mono>",
+      "trust_write_file": "Schreibzugriffen auf diese Datei vertrauen: <mono>{{path}}</mono>",
+      "trust_write_workspace": "Schreibzugriffen überall unter diesem Arbeitsbereich vertrauen: <mono>{{path}}</mono>"
     },
     "tunnelStatus": {
       "connected": "Verbunden",

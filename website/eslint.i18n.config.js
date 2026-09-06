@@ -75,6 +75,16 @@ export default [
       // copy added here will not be reported. Verified copy-free rather than
       // assumed — it imports neither `i18nT` nor `useTranslation`.
       'src/pierre/config.ts',
+      // Escape-sequence fragments for the write-scope consent label
+      // (`'\\x'`, `'\\u{'`): the module turns hidden code points in a
+      // filesystem path into their JavaScript escape spelling and contains
+      // nothing else. Same named-boundary idiom as `folderColorPaint.ts`
+      // above; its consumer (TrustDropdown.tsx) stays fully covered.
+      //
+      // Stated as a false-negative class: user-visible copy added here will
+      // not be reported. Verified copy-free -- it imports neither `i18nT`
+      // nor `useTranslation`.
+      'src/utils/visiblePath.ts',
       // Injected stylesheet text for the chat file-change chips: selectors,
       // lengths and keyframes handed to the CSS parser, with the two layout
       // numbers and the animation duration the rules interpolate. Extracted from
