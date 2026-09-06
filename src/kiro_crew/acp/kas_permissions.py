@@ -63,9 +63,16 @@ CAPABILITY_BY_TOOL: dict[str, str] = {
     # Network.
     "web_fetch": "web_fetch",
     "web_search": "web_search",
-    # Sub-agents and skills.
-    "invoke_sub_agent": "subagent",
-    "disclose_context": "skill",
+    # Sub-agents. Keyed on the CREW tool name that lands in ``allowedTools``
+    # (``use_subagent``), not KAS's internal toolId (``invoke_sub_agent``): this
+    # map is consulted against the allowlist Crew writes, so a KAS-internal key
+    # never matches and the capability is never granted -- the subagent request
+    # then falls through to prompt and, on a non-interactive backend, is
+    # auto-refused (#9024). For the same reason there is no skill entry here: no
+    # Crew ``allowedTools`` names a skill-disclosure tool, so any such key would
+    # be a dead promise that never matches (the earlier ``disclose_context`` was
+    # KAS's internal name and matched nothing).
+    "use_subagent": "subagent",
 }
 
 #: Tools this module refuses to translate even though the capability exists.

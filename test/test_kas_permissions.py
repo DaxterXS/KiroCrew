@@ -46,9 +46,24 @@ class TestBuiltinToolsBecomeCapabilities:
         """KAS reads a missing ``match`` as every resource — the intended meaning."""
         assert "match" not in _rule(allowed_tools_to_permissions(["web_search"]), "web_search")
 
+    def test_the_crew_subagent_name_grants_the_subagent_capability(self):
+        """The name ``allowedTools`` carries is ``use_subagent``, not KAS's
+        internal ``invoke_sub_agent`` -- so the capability must be keyed on the
+        former or the grant is silently never emitted (#9024)."""
+        assert CAPABILITY_BY_TOOL.get("use_subagent") == "subagent"
+        policy = allowed_tools_to_permissions(["use_subagent"])
+        assert policy == {"rules": [{"capability": "subagent", "effect": "allow"}]}
+
+    def test_the_kas_internal_subagent_name_is_not_the_key(self):
+        """A regression guard: keying on the KAS toolId is the original bug, and
+        that name never appears in a Crew ``allowedTools`` list, so it must NOT
+        classify -- an entry that cannot match the allowlist emits no rule."""
+        assert "invoke_sub_agent" not in CAPABILITY_BY_TOOL
+        assert allowed_tools_to_permissions(["invoke_sub_agent"]) is None
+
     def test_rules_are_ordered_deterministically(self):
         """Two rebuilds of the same list must produce byte-identical output."""
-        entries = ["web_search", "invoke_sub_agent", "web_fetch"]
+        entries = ["web_search", "use_subagent", "web_fetch"]
         first = allowed_tools_to_permissions(entries)
         second = allowed_tools_to_permissions(list(reversed(entries)))
         assert first == second
