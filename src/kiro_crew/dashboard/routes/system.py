@@ -127,6 +127,19 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/computer-use/config", handlers.api_computer_use_config_get)
     app.router.add_put("/api/computer-use/config", handlers.api_computer_use_config_save)
 
+    # The standing approval tier. A KEYSTONE leaf rather than a `config.json` key,
+    # so it needs its own route pair: the generic `/api/config/kirocrew` PATCH
+    # writes `config.json`, which is not write-caught on the shell path and would
+    # therefore be self-grantable by an auto-approved agent shell. Both legs are
+    # owner-gated -- the GET too, because the stored tier tells a caller whether
+    # the sessions around it are already elevated.
+    app.router.add_get(
+        "/api/security/default-approval-mode", handlers.api_default_approval_mode_get
+    )
+    app.router.add_put(
+        "/api/security/default-approval-mode", handlers.api_default_approval_mode_save
+    )
+
     # Paid-AWS-service consent (Settings > Voice). Browser-called and
     # cookie-authed like the computer-use pair above, and for the same reason:
     # this is the operator's out-of-band surface for an authorization the agent

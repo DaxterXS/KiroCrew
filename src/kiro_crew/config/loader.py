@@ -817,6 +817,19 @@ def denied_commands_path() -> Path:
     return config_dir() / "denied_commands.json"
 
 
+def default_approval_mode_path() -> Path:
+    """Return path to default_approval_mode.json -- the standing approval tier.
+
+    Same KEYSTONE reasoning as :func:`denied_commands_path`, and the leaf is on
+    ``security._CREW_SECRET_LEAVES`` for the same reason: the tier a new session
+    starts on decides whether its tools run without a human approving each call,
+    which is a security ceiling, not a preference. Keeping it out of
+    ``config.json`` is what makes it un-flippable by an auto-approved agent
+    shell. Respects ``KIROCREW_HOME``.
+    """
+    return config_dir() / "default_approval_mode.json"
+
+
 def computer_use_state_path() -> Path:
     """Return path to computer_use.json — the computer-use primary enable.
 

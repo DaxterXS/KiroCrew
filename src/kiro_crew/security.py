@@ -339,7 +339,8 @@ BUILTIN_DENIED_RULES: list[DeniedCommandRule] = [
             # sink prefix is what makes this safe -- it is precisely what a regex
             # literal (``re.search(...)``), a commit message and prose lack, so
             # they stay allowed while ``os.system(\"... token\")`` does not.
-            "|" "(?:os\\.system|os\\.popen|os\\.exec\\w*|(?:asyncio\\.)?create_subprocess_\\w*"
+            "|"
+            "(?:os\\.system|os\\.popen|os\\.exec\\w*|(?:asyncio\\.)?create_subprocess_\\w*"
             "|(?:\\w+\\.)?(?:run|call|check_call|check_output|popen|Popen|getoutput|getstatusoutput)"
             "|commands\\.getoutput|popen\\d?|system|shell_exec|passthru|proc_open"
             "|child_process\\.exec\\w*|exec\\w*sync|spawn\\w*"
@@ -2984,9 +2985,7 @@ class _DenyMatcher:
             # right. Such a pattern keeps the bounded engine it already had; only
             # patterns that are free to run unbounded get the full-input path.
             single_fragment = (
-                frags is not None
-                and len(frags) == 1
-                and not _polynomial_backtracking_prone(linear)
+                frags is not None and len(frags) == 1 and not _polynomial_backtracking_prone(linear)
             )
             if (
                 frags is None
@@ -3517,10 +3516,42 @@ _ENV_SPLIT_PROGRAMS = frozenset({"env"})
 # unrecognised program is "this could execute the name".
 _DATA_CONSUMER_PROGRAMS = frozenset(
     {
-        "echo", "printf", "print", "cat", "tac", "tee", "head", "tail", "less", "more",
-        "grep", "egrep", "fgrep", "rg", "ag", "ack", "sed", "awk", "cut", "tr", "sort",
-        "uniq", "wc", "nl", "fold", "column", "comm", "diff", "strings", "jq", "yq",
-        "base64", "md5sum", "sha256sum", "xxd", "od",
+        "echo",
+        "printf",
+        "print",
+        "cat",
+        "tac",
+        "tee",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "ack",
+        "sed",
+        "awk",
+        "cut",
+        "tr",
+        "sort",
+        "uniq",
+        "wc",
+        "nl",
+        "fold",
+        "column",
+        "comm",
+        "diff",
+        "strings",
+        "jq",
+        "yq",
+        "base64",
+        "md5sum",
+        "sha256sum",
+        "xxd",
+        "od",
     }
 )
 # Control operators that end one command and begin another.  Used to find the
@@ -3574,9 +3605,7 @@ _OUTPUT_REDIRECT_RE = re.compile(r"(?:\d+|&|\*|\{[A-Za-z_][A-Za-z0-9_]*\})?>{1,2
 # spelling (``2>``, ``&>``, ``{fd}>``, ``1>``), which is exactly where a
 # redirection is most often written -- so the descriptor read as an ordinary
 # refspec and the command after the redirect was absorbed as arguments.
-_REDIRECT_START_RE = re.compile(
-    r"(?:\d+|&|\*|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:>{1,2}[&|!]?|<{1,3})"
-)
+_REDIRECT_START_RE = re.compile(r"(?:\d+|&|\*|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:>{1,2}[&|!]?|<{1,3})")
 # ``X=kirocrew; $X token`` assigns the program name to a variable and invokes it
 # through the expansion, so neither the literal name nor the expansion alone looks
 # dangerous.  The assignment and the use are in the SAME command text, so the
@@ -3702,9 +3731,7 @@ def _resolve_function_aliases(tokens: "list[str]") -> "list[str]":
 # ``${VAR:0}`` / ``${VAR^^}`` / ``${VAR/x/y}`` and friends TRANSFORM a variable's own
 # value.  The ``:-``/``:+``/``:=``/``:?`` default forms are deliberately NOT matched here --
 # those carry a literal of their own and are handled by ``_resolve_param_defaults``.
-_PARAM_TRANSFORM_RE = re.compile(
-    r"\$\{([A-Za-z_]\w*)(?::(?![-+=?])[^}]*|[#%^,/@][^}]*)\}"
-)
+_PARAM_TRANSFORM_RE = re.compile(r"\$\{([A-Za-z_]\w*)(?::(?![-+=?])[^}]*|[#%^,/@][^}]*)\}")
 
 
 # ``${!VAR}`` expands to the value of the variable NAMED by ``VAR`` -- one more hop
@@ -3840,9 +3867,7 @@ def _resolve_local_assignments(tokens: "list[str]") -> "list[str]":
             # matters where it is used as a program or verb, and a wrong guess there is a
             # refusal, not a bypass.  The ``:-``/``:+``/``:=``/``:?`` DEFAULT forms are
             # excluded: they carry their own literal and are resolved separately.
-            token = _PARAM_TRANSFORM_RE.sub(
-                lambda m: values.get(m.group(1), m.group(0)), token
-            )
+            token = _PARAM_TRANSFORM_RE.sub(lambda m: values.get(m.group(1), m.group(0)), token)
             token = _INDIRECT_VAR_USE_RE.sub(
                 lambda m: values.get(values.get(m.group(1), ""), m.group(0)), token
             )
@@ -3950,9 +3975,7 @@ def _pipes_into_evaluator(tokens: "list[str]") -> bool:
 
 # Constructs by which a text-processing tool RUNS a command rather than printing it:
 # ``awk``'s ``system()`` and pipe-to-command, and GNU ``sed``'s ``e`` flag.
-_SCRIPT_EXECUTES_RE = re.compile(
-    r"system\s*\(|\|\s*[\"']|\|&|print\s*\||\bclose\s*\(|/e\b|\be\s*$"
-)
+_SCRIPT_EXECUTES_RE = re.compile(r"system\s*\(|\|\s*[\"']|\|&|print\s*\||\bclose\s*\(|/e\b|\be\s*$")
 
 
 def _data_consumer_command_disqualified(tokens: "list[str]") -> bool:
@@ -3974,8 +3997,10 @@ def _data_consumer_command_disqualified(tokens: "list[str]") -> bool:
         return True
     # ``$(printf <name>) <verb>`` puts the consumer INSIDE a substitution that occupies
     # program position, so its OUTPUT is what runs -- the words are not inert data.
-    if tokens and tokens[0].lstrip("\"'").startswith("$(") or (
-        tokens and tokens[0].lstrip("\"'").startswith("`")
+    if (
+        tokens
+        and tokens[0].lstrip("\"'").startswith("$(")
+        or (tokens and tokens[0].lstrip("\"'").startswith("`"))
     ):
         return True
     # A "data consumer" that can EXECUTE is not one for this command.  ``awk`` has
@@ -4638,10 +4663,7 @@ _NUMERIC_ESCAPE_RE = re.compile(
 # (BLOCKING from the GPT 5.6 lane).  Group order matches _NUMERIC_ESCAPE_RE so
 # ``_numeric_escape_code`` reads either match.
 _ANSI_C_NUMERIC_ESCAPE_RE = re.compile(
-    r"\\(?:[xX]([0-9a-fA-F]{1,2})"
-    r"|u([0-9a-fA-F]{1,4})"
-    r"|U([0-9a-fA-F]{1,8})"
-    r"|([0-7]{1,3}))"
+    r"\\(?:[xX]([0-9a-fA-F]{1,2})" r"|u([0-9a-fA-F]{1,4})" r"|U([0-9a-fA-F]{1,8})" r"|([0-7]{1,3}))"
 )
 
 
@@ -5893,7 +5915,8 @@ def _bare_kill_raw_bodies(source: str) -> "list[str]":
                     jumped = True
                     break
                 if ch in "&|" and (
-                    (word and word[-1] in "<>") or (ch == "&" and not word and source.startswith(">", off + 1))
+                    (word and word[-1] in "<>")
+                    or (ch == "&" and not word and source.startswith(">", off + 1))
                 ):
                     # The full redirect grammar audited against the separator
                     # set (this class produced three review rounds one spelling
@@ -8405,6 +8428,24 @@ _CREW_SECRET_LEAVES: list[str] = [
     # handler is the only writer and it opens the path directly, not through this
     # gate, so the operator's Settings toggle still works.
     "computer_use.json",
+    # The approval tier every NEW chat session starts on
+    # (``{"mode": "normal"|"trust_reads"}``). Same class of control as
+    # ``computer_use.json`` directly above, and here for the same reason: the tier
+    # decides whether a session's tools run without a human approving each call, so
+    # it is a security ceiling, not a preference. Storing it in the agent-readable
+    # ``config.json`` would leave it writable by any auto-approved agent shell (the
+    # verification is recorded on ``computer_use.json``:
+    # ``is_sensitive_bash_command("echo x > .../config.json")`` is None), which would
+    # let an agent grant the standing tier to every session minted afterwards --
+    # a self-grant that no later gate can distinguish from the operator's own choice.
+    #
+    # Read+write protected, not write-only: the value tells an agent whether the
+    # sessions around it are already elevated, which is reconnaissance for choosing
+    # what to attempt. Both the tool path (``is_sensitive_path``) and the shell forms
+    # are covered -- protected on one path only is not protected. The dashboard PUT
+    # handler is the only writer and opens the path directly, not through this gate,
+    # so the operator's Settings card still works.
+    "default_approval_mode.json",
     # Browser Mode's durable ENABLE gate. Same class of control as
     # ``computer_use.json`` directly above: while it is present the browse proxy
     # is registered and the ``browser_*`` tools are in the agent's tool list,
@@ -9320,8 +9361,7 @@ def _build_sensitive_regex() -> re.Pattern[str]:
     # legitimate read.
     win_path_end = rf"(?:{win_sep}|\s|$|['\"]|[;&|()<>,:`$])"
     win_dirs_pattern = "|".join(
-        win_gsep.join(re.escape(part) for part in d.split("/"))
-        for d in _SENSITIVE_HOME_DIRS
+        win_gsep.join(re.escape(part) for part in d.split("/")) for d in _SENSITIVE_HOME_DIRS
     )
     generic_win_home = rf"[A-Za-z]:{win_sep}(?:Users|home){win_sep}[^\\/\s'\"]+"
     unc_prefix = r"\\\\[^\s'\"]+"
@@ -9344,10 +9384,7 @@ def _build_sensitive_regex() -> re.Pattern[str]:
         rf"|{re.escape('$env:HOMEDRIVE$env:HOMEPATH')}"
         rf"|{re.escape('${env:HOMEDRIVE}${env:HOMEPATH}')})"
     )
-    win_home_alts = (
-        f"(?:{home}|{generic_win_home}|{userprofile}"
-        f"|{tilde}|{home_var})"
-    )
+    win_home_alts = f"(?:{home}|{generic_win_home}|{userprofile}" f"|{tilde}|{home_var})"
     # Between the anchor and the fenced remainder, accept the same
     # canonical-no-op chains (``\.\``, ``\X\..\``): they are equivalent to a
     # plain separator, so ``%APPDATA%\.\kiro-cli\data.sqlite3`` and
@@ -9369,8 +9406,7 @@ def _build_sensitive_regex() -> re.Pattern[str]:
     # one form the tokenizing passes cannot see, so leaving it out would fence the temp
     # everywhere except in an embedded-script literal.
     win_artifact_parents_pattern = "|".join(
-        win_gsep.join(re.escape(part) for part in d.split("/"))
-        for d in _KEYSTONE_ARTIFACT_PARENTS
+        win_gsep.join(re.escape(part) for part in d.split("/")) for d in _KEYSTONE_ARTIFACT_PARENTS
     )
     win_artifact_path = (
         rf"{win_anchor}(?:{win_artifact_parents_pattern})"
@@ -9435,16 +9471,14 @@ def _build_sensitive_regex() -> re.Pattern[str]:
     # generalized separator, so both spellings of every leaf are gated
     # identically and a leaf added to the tuple is covered in both.
     win_wp_prefixes = "|".join(
-        win_gsep.join(re.escape(part) for part in p.split("/"))
-        for p in _CREW_HOME_PREFIXES
+        win_gsep.join(re.escape(part) for part in p.split("/")) for p in _CREW_HOME_PREFIXES
     )
     win_wp_leaves = "|".join(
         win_gsep.join(re.escape(part) for part in leaf.split("/"))
         for leaf in _WRITE_PROTECTED_BASH_LEAVES
     )
     win_write_protected_path = (
-        rf"{win_anchor}(?:{win_wp_prefixes}){win_gsep}"
-        rf"(?:{win_wp_leaves}){win_path_end}"
+        rf"{win_anchor}(?:{win_wp_prefixes}){win_gsep}" rf"(?:{win_wp_leaves}){win_path_end}"
     )
     # A native spelling whose LEAF is an expansion: ``%USERPROFILE%\.kiro\crew\%F%``
     # names the keystone without spelling any of its literal leaves, so no branch
@@ -9500,8 +9534,7 @@ def _build_sensitive_regex() -> re.Pattern[str]:
         r"|\$[A-Za-z_][A-Za-z0-9_]*)"
     )
     win_crew_var_leaf_path = (
-        rf"{win_anchor}(?:{win_crew_leaf_parents})"
-        rf"{win_sep}{any_expansion}"
+        rf"{win_anchor}(?:{win_crew_leaf_parents})" rf"{win_sep}{any_expansion}"
     )
     # ── ~/.kiro/agents WRITE-protection (a whole DIRECTORY, not a leaf) ──
     # A spec under this dir becomes a KIROCREW_MCP_TARGET_<SERVER> command the
@@ -9539,9 +9572,7 @@ def _build_sensitive_regex() -> re.Pattern[str]:
         rf"(?:{home_alts}/(?:{agents_dir_alt})"
         rf"|{kiro_home_var}/(?:{agents_leaf_alt})){path_end}"
     )
-    win_agents_dir_alt = win_gsep.join(
-        re.escape(part) for part in _KIRO_AGENTS_DIR.split("/")
-    )
+    win_agents_dir_alt = win_gsep.join(re.escape(part) for part in _KIRO_AGENTS_DIR.split("/"))
     # cmd.exe ``%KIRO_HOME%`` (with expansion modifiers) and the two PowerShell
     # spellings, mirroring ``userprofile``/``appdata_var`` above.
     win_kiro_home_var = (
@@ -9642,13 +9673,11 @@ def _build_sensitive_regex() -> re.Pattern[str]:
         # write verb are caught, not just an enumerated allowlist. Bash reads of
         # the dir are blocked incidentally (harmless — no secret, Python readers
         # only); tool-path reads stay allowed.
-        rf"|(?:^|[\s'\"=:,;]){agents_write_path}"
-        rf"|(?:^|[\s'\"=:,;]){win_agents_write_path}"
+        rf"|(?:^|[\s'\"=:,;]){agents_write_path}" rf"|(?:^|[\s'\"=:,;]){win_agents_write_path}"
         # (10) whisper weight FILENAMES, also with no anchor, because the digest the
         # model store checks only binds the bytes if the name it then loads cannot be
         # rewritten by a ``cd``-relative command.
-        rf"|{bare_protected_path}"
-        rf"|{bare_weight_path})",
+        rf"|{bare_protected_path}" rf"|{bare_weight_path})",
         re.IGNORECASE,
     )
 
@@ -9939,7 +9968,9 @@ def _resolved_forms_bounded(expanded: str) -> set[str]:
     if history is not None and now < history[0]:
         raise PathResolutionStalled(expanded, prefix)
     wedged = _wedged_workers()
-    if wedged >= _MAX_PATH_RESOLVE_WORKERS or (history is not None and wedged >= _MAX_PATH_RESOLVE_WORKERS - 1):
+    if wedged >= _MAX_PATH_RESOLVE_WORKERS or (
+        history is not None and wedged >= _MAX_PATH_RESOLVE_WORKERS - 1
+    ):
         # Every worker is pinned, or this re-probe of a known-stalled prefix
         # would pin the last free one.  Queueing behind a wedged future can only
         # time out, so refuse now.  Nothing was submitted, so nothing is charged
@@ -10860,8 +10891,7 @@ _SENSITIVE_SEGMENT_ALT = "|".join(re.escape(d) for d in _SENSITIVE_HOME_DIRS)
 # matcher runs, not by admitting a run here (#6350) -- see
 # ``_collapse_separator_runs``.
 _SENSITIVE_SEGMENT_ALT_ANYSEP = "|".join(
-    r"[\\/]".join(re.escape(part) for part in d.split("/"))
-    for d in _SENSITIVE_HOME_DIRS
+    r"[\\/]".join(re.escape(part) for part in d.split("/")) for d in _SENSITIVE_HOME_DIRS
 )
 _RELATIVE_SENSITIVE_RE = re.compile(
     rf"(?:^|[\s'\"=:,;])(?:\.\.?[\\/])+(?:{_SENSITIVE_SEGMENT_ALT_ANYSEP})"
@@ -11033,8 +11063,7 @@ def _fence_hit_in_collapsed(command: str) -> str | None:
             return "Blocked: command extracts into the governance trust-root directory"
         if _RELATIVE_SENSITIVE_RE.search(candidate):
             return (
-                "Blocked: command references a sensitive credential path "
-                "via relative traversal"
+                "Blocked: command references a sensitive credential path " "via relative traversal"
             )
     return None
 
@@ -11179,8 +11208,7 @@ _SHELL_ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(\+?)=(.*)$", re.DOTALL
 # saw it and the path resolved clean. The body admits one level of nesting so
 # `${V:-${W}}` resolves on the outer name rather than the inner one.
 _SHELL_VAR_REF_RE = re.compile(
-    r"\$\{[!#]?([A-Za-z_][A-Za-z0-9_]*)(?:[^{}]|\$\{[^{}]*\})*\}"
-    r"|\$([A-Za-z_][A-Za-z0-9_]*)"
+    r"\$\{[!#]?([A-Za-z_][A-Za-z0-9_]*)(?:[^{}]|\$\{[^{}]*\})*\}" r"|\$([A-Za-z_][A-Za-z0-9_]*)"
 )
 
 # Windows-native spellings of an unresolved expansion: cmd.exe `%VAR%` (with the
@@ -11722,9 +11750,7 @@ def _expansion_readings(token: str, assignments: dict[str, str]) -> list[str]:
 _BRACE_OPERATOR_RE = re.compile(r"^(?::[-+=?]|##?|%%?|\^\^?|,,?|[-+=?]|/)")
 #: ``${NAME<operator><operand>}``, with the tail captured so the operand can be
 #: read out of it. One level of nesting, matching `_SHELL_VAR_REF_RE`.
-_BRACE_WITH_OPERAND_RE = re.compile(
-    r"\$\{[!#]?[A-Za-z_][A-Za-z0-9_]*((?:[^{}]|\$\{[^{}]*\})+)\}"
-)
+_BRACE_WITH_OPERAND_RE = re.compile(r"\$\{[!#]?[A-Za-z_][A-Za-z0-9_]*((?:[^{}]|\$\{[^{}]*\})+)\}")
 
 
 def _brace_operand_reading(token: str) -> str | None:
@@ -11824,8 +11850,7 @@ _GENERAL_PURPOSE_PARENT_DIRS: frozenset[str] = frozenset(
 #: Single-segment entries are excluded on purpose: their parent is the home
 #: directory, and treating ``~`` as holding a secret would taint ``cd ~``.
 _SENSITIVE_LEAF_PARENT_DIRS: list[str] = sorted(
-    {d.rsplit("/", 1)[0] for d in _SENSITIVE_HOME_DIRS if "/" in d}
-    - _GENERAL_PURPOSE_PARENT_DIRS
+    {d.rsplit("/", 1)[0] for d in _SENSITIVE_HOME_DIRS if "/" in d} - _GENERAL_PURPOSE_PARENT_DIRS
 )
 
 
@@ -13276,12 +13301,7 @@ def _find_substitution_openers(command: str) -> int:
     # ``+ 1`` before the floor divide is ceil: an odd count means one unterminated
     # substitution, which must still be counted rather than rounded away.
     backtick_substitutions = (command.count("`") + 1) // 2
-    return (
-        command.count("$(")
-        + backtick_substitutions
-        + command.count("<(")
-        + command.count(">(")
-    )
+    return command.count("$(") + backtick_substitutions + command.count("<(") + command.count(">(")
 
 
 def _find_traversal_views(command: str) -> "list[tuple[str, bool]]":
@@ -13426,9 +13446,7 @@ def _find_traversal_in_view(view: str, captured: bool) -> str | None:
         # an expansion -- a brace group that CLOSES in the same word -- so `{ find ...; }`
         # keeps being read as grouping exactly as before.
         raw = _CONTROL_OPERATOR_RE.split(_REDIR_PREFIX_RE.sub("", token))[-1]
-        raw_is_expansion = (
-            raw is not program and "{" in raw and "}" in raw.partition("{")[2]
-        )
+        raw_is_expansion = raw is not program and "{" in raw and "}" in raw.partition("{")[2]
         if not _find_program_word_names_find(program) and not (
             raw_is_expansion and _find_program_word_names_find(raw)
         ):
@@ -13870,9 +13888,7 @@ def _check_sensitive_via_normalizer(command: str) -> str | None:
     return _check_sensitive_cd_taint(command)
 
 
-def _remember_bases(
-    seen: list[str], bases: list[str], sensitivity: dict[str, bool]
-) -> None:
+def _remember_bases(seen: list[str], bases: list[str], sensitivity: dict[str, bool]) -> None:
     """Add *bases* to the never-pruned *seen* list, keeping order and uniqueness.
 
     Bounded so a long chain of `cd`s cannot grow it without limit; the cap is far
@@ -14134,10 +14150,7 @@ def _shape_path_token(word: str) -> _PathShape:
     text = text.replace("\\", "/")
     if text.startswith("/"):
         absolute = True
-    raw = [
-        _strip_windows_component_padding(segment)
-        for segment in text.split("/")
-    ]
+    raw = [_strip_windows_component_padding(segment) for segment in text.split("/")]
     raw = [segment for segment in raw if segment not in ("", ".")]
     home_anchored = False
     if raw and _HOME_SEGMENT_RE.match(raw[0]):
@@ -14411,11 +14424,11 @@ def _check_sensitive_cd_taint(command: str) -> str | None:
                 # A cd target containing a command substitution with separators may
                 # assemble a sensitive path piecemeal that static analysis cannot
                 # reconstruct.  Fail closed: taint the command.
-                if ("$(" in target or "`" in target):
+                if "$(" in target or "`" in target:
                     inner = (
-                        target[target.index("$(") + 2:]
+                        target[target.index("$(") + 2 :]
                         if "$(" in target
-                        else target[target.index("`") + 1:]
+                        else target[target.index("`") + 1 :]
                     )
                     if any(sep in inner for sep in (";", "&&", "||", "\n")):
                         tainted_by = target
@@ -14440,9 +14453,7 @@ def _check_sensitive_cd_taint(command: str) -> str | None:
                 if target != expanded:
                     unexpanded = _rewrite_windows_home_anchor(target)
                     probe_orig = (
-                        os.path.expanduser(unexpanded)
-                        if unexpanded.startswith("~")
-                        else unexpanded
+                        os.path.expanduser(unexpanded) if unexpanded.startswith("~") else unexpanded
                     )
                     if (
                         is_sensitive_path(probe_orig)
@@ -14507,7 +14518,7 @@ def _check_sensitive_cd_taint(command: str) -> str | None:
             if taint_idx >= 0:
                 break
         if taint_idx >= 0:
-            for seg in aware_segments[taint_idx + 1:]:
+            for seg in aware_segments[taint_idx + 1 :]:
                 seg = seg.strip()
                 if not seg:
                     continue
@@ -14689,13 +14700,9 @@ def _oauth_query_diagnostic(
             continue
         candidate = decoder(value) if decoder is not None else value
         if predicate is not None and predicate(candidate):
-            return _oauth_diagnostic(
-                rule, "query_parameter", candidate, parameter=key
-            )
+            return _oauth_diagnostic(rule, "query_parameter", candidate, parameter=key)
         if predicate is None and len(segments) == 1:
-            return _oauth_diagnostic(
-                rule, "query_parameter", candidate, parameter=key
-            )
+            return _oauth_diagnostic(rule, "query_parameter", candidate, parameter=key)
     if not fallback:
         return None
     target = decoder(query) if decoder is not None else query
@@ -14883,9 +14890,7 @@ def _valid_oauth_extension_path(path: str) -> bool:
 # a gateway restart, while repeated checks against an unchanged file cost one
 # ``stat`` instead of a read+parse+validate pass. (path, None) memoizes the
 # absent-file case; any stat/read error bypasses the memo and fails soft.
-_OAUTH_EXTENSION_MEMO: dict[
-    tuple[str, tuple[int, int] | None], frozenset[tuple[str, str]]
-] = {}
+_OAUTH_EXTENSION_MEMO: dict[tuple[str, tuple[int, int] | None], frozenset[tuple[str, str]]] = {}
 
 
 def _load_operator_oauth_endpoints() -> frozenset[tuple[str, str]]:
@@ -14920,9 +14925,7 @@ def _load_operator_oauth_endpoints() -> frozenset[tuple[str, str]]:
             return frozenset()
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        logger.debug(
-            "oauth_endpoints.json unreadable; ignoring extension file", exc_info=True
-        )
+        logger.debug("oauth_endpoints.json unreadable; ignoring extension file", exc_info=True)
         return frozenset()
 
     approved = _validate_operator_oauth_entries(raw)
@@ -15382,9 +15385,9 @@ def _exfil_url_warning(
         if next_payload == decoded_payload:
             break
         decoded_payload = next_payload
-        if _HARD_CREDENTIAL_RE.search(
+        if _HARD_CREDENTIAL_RE.search(decoded_payload) or _contains_fixed_credential(
             decoded_payload
-        ) or _contains_fixed_credential(decoded_payload):
+        ):
             trace("exfil_encoded_credential")
             return f"Suspicious URL with encoded credential in path/query: {domain}"
 
@@ -16342,10 +16345,7 @@ def _contains_fixed_credential(text: str) -> bool:
 
 def _text_contains_bare_secret(text: str) -> bool:
     """Return True when *text* contains an isolated bare AWS-secret run."""
-    return any(
-        _contains_bare_secret(match.group())
-        for match in _BARE_SECRET_RUN_RE.finditer(text)
-    )
+    return any(_contains_bare_secret(match.group()) for match in _BARE_SECRET_RUN_RE.finditer(text))
 
 
 # Markerless 40-character values collide with OAuth entropy only for these
@@ -16413,9 +16413,7 @@ def _oauth_credential_scan_target(
         return url
 
     sanitized_segments: list[str] = []
-    for key, separator, value in (
-        segment.partition("=") for segment in query.split("&")
-    ):
+    for key, separator, value in (segment.partition("=") for segment in query.split("&")):
         approved_value = (
             bool(separator)
             and key in _OAUTH_ENTROPY_QUERY_PARAMS
@@ -17412,9 +17410,7 @@ def _deny_segment_views(segment: str, emit_self: bool = True) -> tuple[str, ...]
                     seen_views.add(candidate)
                     views.append(candidate)
             joined_here: set[str] = set()
-            payloads = _nested_shell_payloads(
-                tokens, allow_join=allow_join, joined_out=joined_here
-            )
+            payloads = _nested_shell_payloads(tokens, allow_join=allow_join, joined_out=joined_here)
             programs = _argv_programs(tokens) if payloads else []
             # Both values below read ONLY ``tokens``, which is fixed for this
             # whole walk, so they are charged ONCE here instead of once per
@@ -19090,25 +19086,19 @@ _FD_EXEC_FLAGS: frozenset[str] = frozenset({"-x", "-X", "--exec", "--exec-batch"
 #: ``ugrep`` is GNU-compatible: it takes a pattern and needs ``-r``/``--recursive``
 #: to walk, so it shares grep's grammar and grep's recursion test rather than
 #: needing a rule of its own.
-_GREP_PROGRAM_NAMES: frozenset[str] = frozenset(
-    {"grep", "egrep", "fgrep", "ugrep"}
-)
+_GREP_PROGRAM_NAMES: frozenset[str] = frozenset({"grep", "egrep", "fgrep", "ugrep"})
 
 #: Greppers that recurse with NO flag at all, so naming the root is the whole
 #: command. ``ag`` (the_silver_searcher) and ``ack`` belong here for the same reason
 #: ``rgrep`` does, and leaving them out made the fix one renamed binary wide: this
 #: module already names both in :data:`_DATA_CONSUMER_PROGRAMS`, so they were known
 #: tools sitting outside the only set that would have caught them.
-_ALWAYS_RECURSIVE_GREP_NAMES: frozenset[str] = frozenset(
-    {"rgrep", "ag", "ack", "ack-grep"}
-)
+_ALWAYS_RECURSIVE_GREP_NAMES: frozenset[str] = frozenset({"rgrep", "ag", "ack", "ack-grep"})
 
 #: The long spellings that turn grep into a traversal. The short forms are
 #: recognised by scanning cluster letters (``-rn`` is ``-r -n``), which a set of
 #: whole tokens cannot see.
-_GREP_RECURSIVE_LONG_FLAGS: frozenset[str] = frozenset(
-    {"--recursive", "--dereference-recursive"}
-)
+_GREP_RECURSIVE_LONG_FLAGS: frozenset[str] = frozenset({"--recursive", "--dereference-recursive"})
 
 #: GNU grep's OTHER recursive switch: ``-d recurse`` / ``--directories=recurse``
 #: sets the directory ACTION rather than passing a recursion flag, and it
@@ -19135,17 +19125,13 @@ _PATTERN_SUPPLYING_FLAGS: frozenset[str] = frozenset(
 #: The subset of the above whose pattern arrives as a VALUE. ``--files`` and
 #: ``--type-list`` are modes that take no argument, so consuming the next word
 #: after them would swallow a root.
-_PATTERN_VALUE_FLAGS: frozenset[str] = frozenset(
-    {"-e", "--regexp", "-f", "--file"}
-)
+_PATTERN_VALUE_FLAGS: frozenset[str] = frozenset({"-e", "--regexp", "-f", "--file"})
 
 #: Flags whose value IS a traversal root. Their value is always tested, never
 #: exempted as the pattern: ``fd --search-path ~/.kiro/crew '^\.env$' -x cat``
 #: puts the root in the first positional slot, so a pattern exemption that only
 #: counted positionals skipped the root itself.
-_ROOT_SUPPLYING_FLAGS: frozenset[str] = frozenset(
-    {"--search-path", "--base-directory"}
-)
+_ROOT_SUPPLYING_FLAGS: frozenset[str] = frozenset({"--search-path", "--base-directory"})
 
 #: Programs whose whole job is to emit paths under a root. Harmless alone; they
 #: matter when a sink turns the list into content.
@@ -19235,9 +19221,7 @@ _ENV_COMMAND_STRING_FLAGS: frozenset[str] = frozenset({"-S", "--split-string"})
 #: ``command grep -r . ~/.kiro/crew`` from being read as a stage that runs
 #: ``command``, which no rule here matches. The same three the ``cd`` walk
 #: unwraps, plus ``exec``, which replaces the shell with the traversal.
-_ALT_EXEC_WRAPPER_PROGRAMS: frozenset[str] = frozenset(
-    {"builtin", "command", "exec", "&"}
-)
+_ALT_EXEC_WRAPPER_PROGRAMS: frozenset[str] = frozenset({"builtin", "command", "exec", "&"})
 
 #: ``exec -a NAME prog`` takes a value, so the name must be skipped with the flag
 #: or it is read as the program.
@@ -19269,9 +19253,7 @@ _ALT_ARGV_FORWARDING_PROGRAMS: frozenset[str] = frozenset(
 #: duration (``5``, ``1.5m``), ``taskset``'s CPU mask (``0x3``), ``chrt``'s
 #: priority. Matched by SHAPE rather than by a per-wrapper table, because a table
 #: entry omitted is a wrapper whose duration gets read as the program word.
-_ALT_WRAPPER_OPERAND_RE = re.compile(
-    r"\A(?:[0-9]+(?:\.[0-9]+)?[smhd]?|0[xX][0-9a-fA-F]+)\Z"
-)
+_ALT_WRAPPER_OPERAND_RE = re.compile(r"\A(?:[0-9]+(?:\.[0-9]+)?[smhd]?|0[xX][0-9a-fA-F]+)\Z")
 
 #: Executable suffixes Windows appends to a program name. ``_program_basename``
 #: deliberately leaves them on -- the checks that care spell them in their own
@@ -20193,9 +20175,7 @@ def _alt_pattern_flag_supplies_a_value(flag: str) -> bool:
         return False
     if flag in _PATTERN_VALUE_FLAGS:
         return True
-    return not _alt_long_flag_matches(
-        flag, _PATTERN_SUPPLYING_FLAGS - _PATTERN_VALUE_FLAGS
-    )
+    return not _alt_long_flag_matches(flag, _PATTERN_SUPPLYING_FLAGS - _PATTERN_VALUE_FLAGS)
 
 
 def _alt_without_pattern_flag_values(
@@ -20233,9 +20213,7 @@ def _alt_without_pattern_flag_values(
         # glues it on. Matching whole tokens saw neither, so `grep -re "$HOME/.kiro"
         # ./src` still tested the pattern as a root.
         cluster = token[1:]
-        position = next(
-            (i for i, letter in enumerate(cluster) if letter in ("e", "f")), None
-        )
+        position = next((i for i, letter in enumerate(cluster) if letter in ("e", "f")), None)
         if position is None:
             kept.append(token)
             continue
@@ -20653,9 +20631,7 @@ def _grep_is_recursive(
     than the next reading of the same one.
     """
     resolved = assignments or {}
-    readings = [
-        _alt_token_readings(token, resolved, history, budget) for token in operands
-    ]
+    readings = [_alt_token_readings(token, resolved, history, budget) for token in operands]
 
     def _next_operand_is_recurse(index: int) -> bool:
         return index + 1 < len(readings) and any(
@@ -20792,9 +20768,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
         # stages -- so a payload carried by a variable-named shell (`S=sh; "$S" -c
         # '…'`) had nothing to resolve against on the first pass. Re-stage with them
         # and union: the second pass only ever adds stages, under the same budget.
-        second, also_truncated = _alt_pipeline_stages_bounded(
-            command, assignments=assignments
-        )
+        second, also_truncated = _alt_pipeline_stages_bounded(command, assignments=assignments)
         truncated = truncated or also_truncated
         for tokens in second:
             if tokens not in stages:
@@ -20825,9 +20799,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
             operand_readings = [
                 reading
                 for token in operands
-                for reading in _alt_token_readings(
-                    token, assignments, assignment_history, work
-                )
+                for reading in _alt_token_readings(token, assignments, assignment_history, work)
             ]
             if program in _FD_PROGRAM_NAMES:
                 delivers = sink or any(
@@ -20837,9 +20809,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
             elif program in _ALWAYS_RECURSIVE_GREP_NAMES:
                 delivers = True
             elif program in _GREP_PROGRAM_NAMES:
-                if not _grep_is_recursive(
-                    operands, assignments, assignment_history, work
-                ):
+                if not _grep_is_recursive(operands, assignments, assignment_history, work):
                     continue
                 delivers = True
             elif program in _RIPGREP_PROGRAM_NAMES:
@@ -20847,8 +20817,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
                 # leaves ripgrep in matching mode here, which needs no sink and so
                 # denies rather than allows.
                 lister = any(
-                    token.partition("=")[0] in _RIPGREP_LISTER_FLAGS
-                    for token in operand_readings
+                    token.partition("=")[0] in _RIPGREP_LISTER_FLAGS for token in operand_readings
                 )
                 delivers = sink if lister else True
             elif program in _PATH_LISTER_PROGRAMS:
@@ -20876,11 +20845,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
                     f"gate performs ({_ALT_MAX_RESOLUTIONS} units), so a traversal "
                     "in it cannot be ruled out"
                 )
-            if (
-                root is None
-                and may_assume_cwd
-                and not _alt_names_an_explicit_root(roots)
-            ):
+            if root is None and may_assume_cwd and not _alt_names_an_explicit_root(roots):
                 root = _alt_implicit_cwd_root(cd_bases)
             if root is not None:
                 return (
@@ -20901,9 +20866,7 @@ def _check_alt_traversal_reaches_fence(command: str) -> str | None:
     return None
 
 
-def _check_imds_access(
-    command: str, *, enabled_ids: "frozenset[str] | None" = None
-) -> str | None:
+def _check_imds_access(command: str, *, enabled_ids: "frozenset[str] | None" = None) -> str | None:
     """Detect attempts to access the IMDS endpoint via any encoding.
 
     Returns denial reason if IMDS access detected, None otherwise.

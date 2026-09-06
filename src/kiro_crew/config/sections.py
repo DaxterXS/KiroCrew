@@ -3881,6 +3881,11 @@ _YOLO_DURATION_SECS: dict[str, int] = {
     "24h": 86400,
 }
 _YOLO_DURATION_DEFAULT = "6h"
+# Approval tiers a NEW session may be defaulted to, in the order the dashboard
+# picker declares them (``APPROVAL_SEGMENTS`` in
+# ``website/src/components/ApprovalModePicker.tsx``) with ``yolo`` removed.
+#
+
 # Not a timed value: an ad-hoc grant that stays on with no expiry until the
 # gateway process stops. In-memory only, so it cannot survive a restart.
 YOLO_UNTIL_SHUTDOWN = "until_shutdown"

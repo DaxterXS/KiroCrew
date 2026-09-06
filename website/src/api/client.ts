@@ -381,6 +381,25 @@ export interface ComputerUseConfigSave {
   extra_denied_apps: string[]
 }
 
+/** The standing default approval tier for new chats (owner-only leaf).
+ *  `mode` is what a fresh session would start on right now — the server has
+ *  already clamped a non-persistable stored value, so this is effective truth,
+ *  not the raw file. `values` is the offerable, persistable set. */
+export interface DefaultApprovalModeData {
+  mode: string
+  values: string[]
+  /**
+   * The RAW stored value, sent only when the server's clamp changed it.
+   *
+   * `mode` is already clamped, so it can never itself be an unpersistable tier --
+   * a cue keyed off `mode` would be a branch that never fires. The owner can still
+   * reach this state by hand-editing the keystone leaf (it is un-writable by the
+   * AGENT, not by the person who owns the machine), which is the case the override
+   * cue exists for.
+   */
+  stored?: string
+}
+
 /** Slack config as returned by GET /api/slack/config (secrets masked). */
 export interface SlackConfigData {
   connected: boolean
@@ -3743,6 +3762,12 @@ export const api = {
   getComputerUseConfig: () => get('/api/computer-use/config').then(j) as Promise<ComputerUseConfigData>,
   saveComputerUseConfig: (body: Partial<ComputerUseConfigSave>) =>
     put('/api/computer-use/config', body).then(j) as Promise<ComputerUseConfigData>,
+  // Default approval tier for new chats (owner-only leaf, NOT in config.json).
+  // The PUT returns the refreshed snapshot so the card re-renders from server
+  // truth — including the clamp — rather than its optimistic guess.
+  getDefaultApprovalMode: () => get('/api/security/default-approval-mode').then(j) as Promise<DefaultApprovalModeData>,
+  saveDefaultApprovalMode: (mode: string) =>
+    put('/api/security/default-approval-mode', { mode }).then(j) as Promise<DefaultApprovalModeData>,
   // Slack integration config
   getSlackConfig: () => get('/api/slack/config').then(j) as Promise<SlackConfigData>,
   getSlackManifest: () => get('/api/slack/manifest').then(j) as Promise<{ alias: string; manifest: string; create_url: string }>,

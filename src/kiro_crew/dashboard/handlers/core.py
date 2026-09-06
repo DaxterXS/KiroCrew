@@ -1851,6 +1851,13 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     "agent.role_efforts.background": {"type": "enum", "values": ["", *EFFORT_LEVELS]},
     "agent.role_efforts.subagent": {"type": "enum", "values": ["", *EFFORT_LEVELS]},
     "agent.approval_mode": {"type": "enum", "values": ["auto", "interactive"]},
+    # Which approval tier a NEWLY CREATED chat session starts in. Distinct from
+    # ``agent.approval_mode`` above, which is the agent's own auto/interactive
+    # axis -- this one names a dashboard session tier and its vocabulary is the
+    # picker's (``APPROVAL_SEGMENTS``). ``yolo`` is absent because it is a
+    # process-global grant with its own duration, not a per-session tier. The two
+    # values here are a strict SUBSET of the modes the ``approval_modes`` policy
+    # scope may never forbid, so this cannot select past an admin ceiling; `trust`
     # How long an AD-HOC auto-approve grant lasts. Editable from Settings because
     # every value here still ends: the timed ones are capped at the SafetyOverride
     # 24h ceiling and "until_shutdown" dies with the process. The never-expiring

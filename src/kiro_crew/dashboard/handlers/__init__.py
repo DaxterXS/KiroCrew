@@ -841,6 +841,13 @@ from kiro_crew.dashboard.handlers.computer_use import (  # noqa: E402, F401
     api_computer_use_invoke,
 )
 
+# The standing approval tier -- a KEYSTONE leaf, so it has its own route pair
+# rather than riding the generic ``/api/config/kirocrew`` PATCH.
+from kiro_crew.dashboard.handlers.default_approval_mode import (  # noqa: E402, F401
+    api_default_approval_mode_get,
+    api_default_approval_mode_save,
+)
+
 # ── Core (extracted to handlers/core.py) ──
 from kiro_crew.dashboard.handlers.core import (  # noqa: E402, F401
     _DIST_DIR,

@@ -790,7 +790,34 @@ the agent and silently falls back to default.
 ```python
 @dataclass
 class AgentConfig:
-    approval_mode: str = "auto"    # "auto" or "interactive"
+    approval_mode: str = "auto"    # "auto" or "interactive" — the AGENT's own axis
+    # The DASHBOARD SESSION tier a NEWLY CREATED chat starts on. Distinct from
+    # `approval_mode` above: its vocabulary is the footer picker's
+    # (`APPROVAL_SEGMENTS`), and only TWO of those tiers are PERSISTABLE.
+    #
+    # `trust` and `yolo` are deliberately NOT persistable. `trust` is the only tier
+    # that also writes the session `approval_policy` "auto" (unattended tool
+    # auto-approve, which `parent_trusted` extends to spawned subagents), and
+    # `config.json` is agent-writable — so storing `trust` would let one
+    # already-trusted session raise the floor for every future session. A stored
+    # `trust`/`yolo`/junk value is clamped to `normal` on READ, so it cannot be
+    # smuggled in by hand-editing. Both remain available PER-CHAT from the picker.
+    #
+    # Writing this key is OWNER-ONLY (`_EDITABLE_CONFIG`'s `owner_only`), unlike
+    # every other entry in that allowlist, because it is a STANDING preference.
+    # Applied only at session birth, only for the owner's own sidebar-visible chats
+    # on this crew.
+    #
+    # Refusal observability is PARTIAL, and deliberately so. The tier is READ only
+    # when the caller is the owner, holds no app token, is not remote-bound, and is
+    # in a sidebar-visible mode -- so a caller failing any of those never resolves a
+    # tier and there is nothing to log. Only two refusals are reachable and logged:
+    # a RESUMED session (the read precedes the newness check) and a slot an app won
+    # by race. Everything else is silent BY CONSTRUCTION, which means a non-owner
+    # gets the interactive floor on every chat with no signal anywhere -- a real gap,
+    # recorded here rather than implied away. Closing it would need the read to run
+    # for principals forbidden to use the result, so it is not done.
+    default_approval_mode: str = "normal"  # "normal" or "trust_reads"
     streaming: bool = True
     model: str = "auto"            # resolved from agent config
     provider: str = "acp"          # fixed to "acp" (kiro-cli) — the only provider
@@ -1391,6 +1418,7 @@ Returns the effective config for a channel:
 {
   "agent": {
     "approval_mode": "auto",
+    "default_approval_mode": "normal",
     "streaming": true,
     "provider": "acp"
   },
