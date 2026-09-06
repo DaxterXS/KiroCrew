@@ -20,6 +20,7 @@ from kiro_crew.monitoring.models import (
     MAX_MONITOR_CHECK_IDENTITY_CHARS,
     ProviderErrorKind,
 )
+from kiro_crew.monitoring.provider_cli import audit_provider_cli_denied
 from kiro_crew.monitoring.pull_request import (
     PullRequestCheck,
     PullRequestFacts,
@@ -129,10 +130,17 @@ class GitHubPullRequestProvider:
         raw_target: str,
         *,
         previous_observation: Mapping[str, object] | None = None,
+        use_owner_credentials: bool = True,
     ) -> GitHubPullRequestProbeResult:
         """Return one canonical review-ready observation."""
         try:
             target = parse_github_pull_request_target(raw_target)
+            if not use_owner_credentials:
+                audit_provider_cli_denied("gh")
+                return _provider_error(
+                    ProviderErrorKind.AUTHORIZATION,
+                    "provider_authorization",
+                )
             gh = self._resolver()
             primary = self._runner(
                 [gh, "pr", "view", target.url, "--json", _PR_FIELDS],
@@ -433,7 +441,7 @@ def _normalize_checks(raw: object) -> tuple[GitHubCheck, ...]:
         except ValueError:
             check = GitHubCheck(
                 opaque_provider_check_identity("github_check", identity),
-                "unknown",
+                state,
             )
         normalized.append(check)
     return tuple(sorted(normalized, key=lambda item: item.identity))
@@ -458,9 +466,6 @@ def _normalize_check(
     if typename == "CheckRun":
         name = raw.get("name")
         workflow = raw.get("workflowName")
-        if not isinstance(name, str) or not name:
-            raise ValueError("GitHub check rollup is malformed")
-        identity = f"{workflow} / {name}" if isinstance(workflow, str) and workflow else name
         status = raw.get("status")
         conclusion = raw.get("conclusion")
         if status != "COMPLETED":
@@ -477,10 +482,21 @@ def _normalize_check(
             state = "failed"
         else:
             state = "unknown"
+        if not isinstance(name, str):
+            raise ValueError("GitHub check rollup is malformed")
+        identity = (
+            f"{workflow} / {name}"
+            if name and isinstance(workflow, str) and workflow
+            else name
+            or opaque_provider_check_identity(
+                "github_check",
+                (typename, workflow, status, conclusion),
+            )
+        )
         return identity, state, None
     if typename == "StatusContext":
         context = raw.get("context")
-        if not isinstance(context, str) or not context:
+        if not isinstance(context, str):
             raise ValueError("GitHub check rollup is malformed")
         raw_state = raw.get("state")
         if isinstance(raw_state, str):
@@ -493,7 +509,13 @@ def _normalize_check(
             }.get(raw_state, "unknown")
         else:
             state = "unknown"
-        return context, state, ("status_context", context)
+        if context:
+            return context, state, ("status_context", context)
+        return (
+            opaque_provider_check_identity("github_check", (typename, raw_state)),
+            state,
+            None,
+        )
     raise ValueError("GitHub check rollup is malformed")
 
 
