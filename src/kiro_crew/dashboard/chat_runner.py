@@ -100,6 +100,7 @@ from kiro_crew.dashboard.chat_utils import (
     _redact_meta_for_role,
     _redact_tool_field,
     _remove_queued_by_id,
+    _unified_patch,
     _validate_tool_name,
     build_recovery_requeue,
     effective_session_key,
@@ -1341,8 +1342,22 @@ def _truncate_snapshot(content: str) -> str:
     return content
 
 
-def _safe_read_snapshot(path: str) -> str | None:
-    """Read a file's content for snapshot purposes, refusing sensitive paths.
+def _before_entry(path: str, full: str) -> dict:
+    """The capped before-snapshot, plus the full text when the cap bit.
+
+    ``before_full`` is a TRANSIENT key: ``_flush_file_changes`` consumes it to
+    compute a patch and pops it before anything reaches message meta, so the
+    cap on what is persisted is unchanged. Attached only when truncation
+    actually happened, so an ordinary file costs nothing.
+    """
+    capped = _truncate_snapshot(full)
+    if capped == full:
+        return {"path": path, "content": capped}
+    return {"path": path, "content": capped, "before_full": full}
+
+
+def _safe_read_snapshot_raw(path: str) -> str | None:
+    """Read a file's FULL content for snapshot purposes, refusing sensitive paths.
 
     Routes path validation through ``hooks.validate_file_path`` (the same
     helper hooks.py uses for its own file ops) so the sensitive-path check
@@ -1350,8 +1365,10 @@ def _safe_read_snapshot(path: str) -> str | None:
     checks in the future, both the LLM-tool intercept layer and the snapshot
     layer pick them up automatically.
 
-    Returns the (possibly truncated) text content, or None if the path is
-    sensitive / not a regular file / unreadable.
+    Untruncated: the caller decides whether it needs the capped prefix (for
+    message meta) or the whole text (to compute a patch that a capped prefix
+    could not express). Returns None if the path is sensitive / not a regular
+    file / unreadable.
     """
     try:
         validated = validate_file_path(path)
@@ -1360,12 +1377,36 @@ def _safe_read_snapshot(path: str) -> str | None:
         p = Path(validated)
         if not p.is_file():
             return None
-        # Git and agent-authored files are UTF-8 regardless of the host's
-        # preferred code page. Passing the encoding matters on Windows, where
-        # Path.read_text() otherwise defaults to a legacy locale such as cp1252.
-        return _truncate_snapshot(p.read_text(encoding="utf-8", errors="replace"))
+        # BOUND the read before it happens. This reader exists to feed a full-body
+        # diff, so it is the one snapshot path that is NOT capped by
+        # _MAX_SNAPSHOT — and an agent can write a file of any size. Without a
+        # ceiling the read and the difflib pass below it are both unbounded on the
+        # turn coroutine. Same ceiling and the same double-check as
+        # _reconstruct_str_replace_before: stat() races a writer still growing the
+        # file, so the length is re-checked after the read as well.
+        st = p.stat()
+        if not stat_module.S_ISREG(st.st_mode) or st.st_size > _MAX_RECONSTRUCT_BYTES:
+            return None
+        # Read through hooks.safe_read_file rather than Path.read_text, for the
+        # reason the sibling reader already documents: validate_file_path checks a
+        # path and this reads one, and between the two an agent can swap the
+        # validated file for a symlink pointing outside it. safe_read_file
+        # re-checks the RESOLVED target and opens with O_NOFOLLOW, closing that
+        # window (AWS-33/AWS-62). It also handles the encoding concern that the
+        # old call spelled out by hand: Git and agent-authored files are UTF-8
+        # whatever the host's preferred code page says, which matters on Windows.
+        content = safe_read_file(path)
+        if len(content) > _MAX_RECONSTRUCT_BYTES:
+            return None
+        return content
     except Exception:
         return None
+
+
+def _safe_read_snapshot(path: str) -> str | None:
+    """``_safe_read_snapshot_raw`` capped at :data:`_MAX_SNAPSHOT`."""
+    content = _safe_read_snapshot_raw(path)
+    return None if content is None else _truncate_snapshot(content)
 
 
 def _reconstruct_str_replace_before(path: str, raw_params: dict) -> str | None:
@@ -1513,25 +1554,26 @@ def _snapshot_write_target(
     if cmd == "strReplace":
         before_full = _reconstruct_str_replace_before(path, raw_params)
         if before_full is not None:
-            return {"path": path, "content": _truncate_snapshot(before_full)}
+            return _before_entry(path, before_full)
 
     # Prefer authoritative content-block before-text when available.
     if diff_old_text is not None:
         # diff_old_text == "" means "file was created" (no previous content).
         # Apply truncation so content-block-sourced text obeys the same cap as
         # disk-sourced text (security + message-meta size invariant).
-        before = _truncate_snapshot(diff_old_text) if diff_old_text else ""
-        return {"path": path, "content": before}
+        return (
+            _before_entry(path, diff_old_text) if diff_old_text else {"path": path, "content": ""}
+        )
 
     # Fallback: read from disk (correct on the blocking permission-request path
     # where the write has NOT yet executed).
-    content = _safe_read_snapshot(path)
+    content = _safe_read_snapshot_raw(path)
     if content is None:
         # File doesn't exist yet (`create` on a new file is the common case)
         # OR was unreadable. Either way, record an empty before so the chip
         # still surfaces.
         return {"path": path, "content": ""}
-    return {"path": path, "content": content}
+    return _before_entry(path, content)
 
 
 def _flush_file_changes(slot: "_ChatSlot") -> None:
@@ -1557,12 +1599,44 @@ def _flush_file_changes(slot: "_ChatSlot") -> None:
         p = fc["path"]
         if p not in deduped:
             deduped[p] = {"path": p, "before": fc["content"], "after": ""}
-    # Read after-content once per path. Uses _safe_read_snapshot so sensitive
-    # paths and unreadable files yield empty after rather than crashing or
-    # leaking credentials.
+            # Transient, popped below — never reaches message meta.
+            full = fc.get("before_full")
+            if isinstance(full, str):
+                deduped[p]["before_full"] = full
+    # Read after-content once per path. Uses the raw reader so an oversized file
+    # can still be diffed in full; the capped prefix is what goes to meta.
     for entry in deduped.values():
-        after = _safe_read_snapshot(entry["path"])
-        entry["after"] = after if after is not None else ""
+        after_full = _safe_read_snapshot_raw(entry["path"])
+        entry["after"] = _truncate_snapshot(after_full) if after_full is not None else ""
+        before_full = entry.pop("before_full", None)
+        # The capped pair is cut from the START of the file, so it can misrepresent
+        # a change in two different ways once a body exceeds _MAX_SNAPSHOT:
+        #
+        #   - an edit ENTIRELY past the cap leaves both sides byte-identical, so the
+        #     change vanishes and the budget was spent on a prefix without it;
+        #   - an edit on BOTH sides of the cap shows the reader the early hunk and
+        #     silently drops the later one, which is worse, because nothing on
+        #     screen suggests anything is missing.
+        #
+        # So the question is not "are the capped prefixes identical" -- that was the
+        # original gate and it answered only the first case. It is "can the capped
+        # pair represent every change", which is false whenever either body was
+        # truncated at all. Carry a capped unified diff of the FULL bodies for that
+        # whole class: small for a small edit however large the file, and its hunk
+        # headers keep the TRUE line numbers. An untruncated pair is already
+        # faithful, so it is left alone, and a genuine no-op produces no patch.
+        truncated = (
+            before_full is not None
+            and after_full is not None
+            and (len(before_full) > _MAX_SNAPSHOT or len(after_full) > _MAX_SNAPSHOT)
+        )
+        if (
+            before_full is not None
+            and after_full is not None
+            and truncated
+            and before_full != after_full
+        ):
+            entry["patch"] = _unified_patch(entry["path"], before_full, after_full)
     # Scrub credentials and exfil URLs from path/before/after BEFORE attaching
     # to message meta. _save_slot_to_history runs _redact_meta on persist, but
     # the in-memory slot.messages reaches the dashboard UI via SSE/WS BEFORE
@@ -1578,6 +1652,11 @@ def _flush_file_changes(slot: "_ChatSlot") -> None:
         if entry["after"]:
             entry["after"], _ = redact_credentials(entry["after"])
             entry["after"], _ = redact_exfiltration_urls(entry["after"])
+        # The patch carries file content too, so it obeys the same scrub. Missing
+        # it here would make the oversized-file path a way around this layer.
+        if entry.get("patch"):
+            entry["patch"], _ = redact_credentials(entry["patch"])
+            entry["patch"], _ = redact_exfiltration_urls(entry["patch"])
     # No-op entries (before == after, e.g. an idempotent format-on-save)
     # are deliberately KEPT: the dashboard renders an explicit "no changes"
     # caption for them (FileChangeChips) instead of a contentless diff, so
