@@ -160,6 +160,16 @@ function owns(value: JsonObject, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key)
 }
 
+/** The legacy compatibility feed also projects structured monitors, but
+ * deliberately withholds both the prompt and structured payload. Only rows
+ * carrying their own message are complete legacy records. */
+export function isFullLegacyAutomationRecord(raw: unknown): boolean {
+  const envelope = object(raw)
+  if (!envelope) return false
+  const loop = object(envelope.loop) ?? envelope
+  return owns(loop, 'message')
+}
+
 function structuredFallback(
   loop: JsonObject,
   monitor: JsonObject | null,

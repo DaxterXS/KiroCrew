@@ -59,7 +59,11 @@ import { api } from '../api/client'
 import { resolveAskAfterSend } from '../lib/resolveAskAfterSend'
 import type { PlanStepInput } from '../api/client'
 import { useProvider } from '../providers'
-import { normalizeAutomationRecord, type AutomationRecord } from '../monitoring/automation'
+import {
+  isFullLegacyAutomationRecord,
+  normalizeAutomationRecord,
+  type AutomationRecord,
+} from '../monitoring/automation'
 import { fileReadUrl } from '../utils/fileReadUrl'
 import { safeSetItem, safeSetSessionItem } from '../utils/safeStorage'
 import { handleStopPress, isEscalationState } from '../utils/stopDebounce'
@@ -1053,13 +1057,15 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
         api.autonudgeForSlot(slot),
         api.monitorForSlot(slot),
       ])
-      const legacySnapshot = legacy.loop === null
+      const hasFullLegacyRecord = legacy.loop !== null
+        && isFullLegacyAutomationRecord(legacy.loop)
+      const legacySnapshot = !hasFullLegacyRecord
         ? null
         : normalizeAutomationRecord(legacy.loop)
       const structuredRecord = structured.monitor === null
         ? null
         : normalizeAutomationRecord(structured.monitor)
-      if ((legacy.loop !== null && !legacySnapshot)
+      if ((hasFullLegacyRecord && !legacySnapshot)
         || (structured.monitor !== null
           && structuredRecord?.kind !== 'structured_monitor')) {
         throw new Error('Invalid session automation snapshot')

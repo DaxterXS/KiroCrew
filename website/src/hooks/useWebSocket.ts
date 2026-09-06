@@ -24,7 +24,11 @@ import { applyStatusDelta, parseStatusDelta } from '../utils/pullRequestStatusDe
 import { slotChangeUrls } from '../utils/pullRequestLinks'
 import type { StatusData, ChatMessage, ChatSlot, ChatFolder, Notification, PullRequestStatusBatch, TodoList, McpSessionReport } from '../types'
 import { i18nT } from '../i18n/t'
-import { dashboardAutomationSlotKey, normalizeAutomationRecord } from '../monitoring/automation'
+import {
+  dashboardAutomationSlotKey,
+  isFullLegacyAutomationRecord,
+  normalizeAutomationRecord,
+} from '../monitoring/automation'
 
 type LogCallback = ((data: { level: string; msg: string }) => void) | null
 
@@ -515,7 +519,8 @@ export function useWebSocket() {
           const legacyComplete = legacyStarted && legacyResult.status === 'fulfilled'
           const structuredComplete = structuredStarted && monitorResult.status === 'fulfilled'
           const legacyRecords = legacyStarted && legacyResult.status === 'fulfilled'
-            ? (legacyResult.value.loops ?? []).map(normalizeAutomationRecord)
+            ? (legacyResult.value.loops ?? []).filter(isFullLegacyAutomationRecord)
+                .map(normalizeAutomationRecord)
                 .filter(record => record?.kind === 'legacy_goal_loop')
             : []
           const structuredSnapshotRecords = structuredStarted && monitorResult.status === 'fulfilled'
@@ -2054,6 +2059,7 @@ export function useWebSocket() {
               )
               if (nudge.event === 'removed') {
                 dispatch(removeAutomation(slot))
+                queryClient.invalidateQueries({ queryKey: AUTONUDGE_LOOPS_QUERY_KEY })
                 break
               }
               const record = normalizeAutomationRecord(nudge)

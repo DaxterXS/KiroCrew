@@ -386,6 +386,30 @@ describe('ChatPage active-slot automation hydration', () => {
     expect(chatInputProps?.automationCreationReady).toBe(false)
   })
 
+  it('hydrates a structured monitor alongside its reduced compatibility row', async () => {
+    const monitor = structuredMonitorLoop()
+    const {
+      message: _withheldMessage,
+      monitor: _withheldMonitor,
+      ...reducedMonitor
+    } = monitor
+    apiMocks.autonudgeForSlot = vi.fn().mockResolvedValue({
+      enabled: true,
+      loop: reducedMonitor,
+    })
+    apiMocks.monitorForSlot = vi.fn().mockResolvedValue({ enabled: true, monitor })
+
+    renderChatPage([])
+
+    await waitFor(() => {
+      expect(chatInputProps?.automation).toMatchObject({
+        kind: 'structured_monitor',
+        id: monitor.id,
+      })
+    })
+    expect(chatInputProps?.automationSnapshotFailed).toBe(false)
+  })
+
   it('caches a non-null mutation result before updating the store', async () => {
     const next = normalizeAutomationRecord(structuredMonitorLoop({ probe_count: 2 }))!
     apiMocks.autonudgeForSlot = vi.fn().mockResolvedValue({ enabled: true, loop: null })

@@ -146,6 +146,30 @@ describe('useWebSocket automation seed vs live frames', () => {
     })
   })
 
+  it('ignores reduced structured rows from the legacy compatibility feed', async () => {
+    const {
+      message: _withheldMessage,
+      monitor: _withheldMonitor,
+      ...reducedMonitor
+    } = ACTIVE_MONITOR
+    const active = normalizeAutomationRecord(ACTIVE_MONITOR)!
+    testStore.dispatch(sseAutomation(active))
+    vi.mocked(api.monitorsList).mockRejectedValueOnce(new Error('owner unavailable'))
+    renderHook(() => useWebSocket(), { wrapper })
+    act(() => { WS_INSTANCES[0].simulateOpen() })
+
+    await act(async () => {
+      seedDeferred.resolve({ enabled: true, loops: [reducedMonitor] })
+      await seedDeferred.promise
+      await Promise.resolve()
+    })
+
+    expect(automations()[ACTIVE_MONITOR.slot_key]).toMatchObject({
+      kind: 'structured_monitor',
+      id: ACTIVE_MONITOR.id,
+    })
+  })
+
   it('does not tombstone a per-slot snapshot written after the seed started', async () => {
     renderHook(() => useWebSocket(), { wrapper })
     act(() => { WS_INSTANCES[0].simulateOpen() })
