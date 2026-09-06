@@ -170,6 +170,18 @@ _STRUCTURAL_MARKER_RES: tuple[re.Pattern[str], ...] = (
     # the variable-tail convention above.
     re.compile(r"\[\s*REINJECTED\s*AFTER\s*COMPACTION\s*[-]{1,2}", re.IGNORECASE),
     re.compile(r"\[\s*END\s*REINJECTED\s*\]", re.IGNORECASE),
+    # Skill-load marker. The emitter mints ``[Skill: name]`` for both routes
+    # (trigger loading below, $ expansion in chat_runner) as TRUSTED framing the
+    # Context Breakdown classifier counts by position. A user who TYPES the same
+    # marker in their turn could otherwise shift that occurrence count and move a
+    # route label onto the wrong block (GPT #9096). The emitter-owned markers are
+    # kept out of this scrub by PLACEMENT -- trigger markers are appended raw to
+    # ``parts``; $ markers ride a suffix this function scrubs around (see the
+    # _dollar_suffix split below) -- so this pattern only ever reaches a
+    # user-typed marker in the scrubbed prefix. Head-anchored on ``[Skill:`` per
+    # the convention above (a colon separator, not a hyphen, since that is the
+    # marker's own shape); the name tail is deliberately not matched.
+    re.compile(r"\[\s*Skill\s*:", re.IGNORECASE),
 )
 _STRUCTURAL_MARKER_NEUTRALIZED = "[marker-removed]"
 
@@ -3089,6 +3101,8 @@ class ContextBuilder:
         model_window: int | None = None,
         user_text_range: tuple[int, int] | None = None,
         user_span_out: list[int] | None = None,
+        skill_routes_out: dict[str, list[str]] | None = None,
+        dollar_skill_blocks: list[str] | None = None,
         needs_reinjection: bool = False,
         context_groups: frozenset[str] | None = None,
         member: str = "",
@@ -3634,7 +3648,16 @@ class ContextBuilder:
                     content = self.skills.load_skill(name, project)
                     if content:
                         stripped = self.skills.strip_frontmatter(content)
+                        # Byte-identical ``[Skill: {name}]`` -- no in-text route
+                        # token, so a skill BODY cannot forge one (GPT #9096). The
+                        # route is OUT-OF-BAND: recorded per OCCURRENCE (appended
+                        # to this name's list in emit order), never re-parsed from
+                        # text and never keyed by name alone -- so the same skill
+                        # loaded by two routes in one turn records BOTH, and the
+                        # second does not overwrite the first (GPT #9096 F1).
                         parts.append(f"[Skill: {name}]\n{stripped}\n[End of skill]\n\n")
+                        if skill_routes_out is not None:
+                            skill_routes_out.setdefault(name, []).append("trigger")
                         # Record use only when the body is actually delivered --
                         # a trigger match that never reaches the prompt (false
                         # positive, pointer-only, or undelivered) must not earn
@@ -3713,8 +3736,29 @@ class ContextBuilder:
             if _quick_prompt is not None:
                 turn_text = turn_text[:_q0] + _quick_prompt + turn_text[_q1:]
                 _quick_at = _q0
-        _marker_spans = _structural_marker_spans(turn_text)
-        _turn_neutralized = _apply_marker_spans(turn_text, _marker_spans)
+        # The $-route appends its emitter-owned skill bodies as a fixed suffix of
+        # this turn (chat_runner builds ``message + "\n\n" + "\n\n---\n\n".join(
+        # blocks)`` and hands the SAME blocks here). Those bodies are trusted
+        # framing -- their ``[Skill: name]`` markers must survive so the Context
+        # Breakdown classifier can count emitter-owned marker positions -- so the
+        # structural-marker scrub runs on the USER-TYPED PREFIX only and the
+        # emitter suffix is reattached raw. This is the placement that makes
+        # "bind routes to emitter-owned positions" true by WHERE the text is: a
+        # user-typed ``[Skill: x]`` sits in the scrubbed prefix and is
+        # neutralized, an emitter-loaded one sits in the raw suffix and is not,
+        # so a forged marker cannot shift the classifier's occurrence count
+        # (GPT #9096). The suffix is recomputed here from the block list, not
+        # trusted from a delimiter in the text a body could forge.
+        _dollar_suffix = ""
+        if dollar_skill_blocks:
+            _dollar_suffix = "\n\n" + "\n\n---\n\n".join(dollar_skill_blocks)
+        if _dollar_suffix and turn_text.endswith(_dollar_suffix):
+            _user_prefix = turn_text[: len(turn_text) - len(_dollar_suffix)]
+            _marker_spans = _structural_marker_spans(_user_prefix)
+            _turn_neutralized = _apply_marker_spans(_user_prefix, _marker_spans) + _dollar_suffix
+        else:
+            _marker_spans = _structural_marker_spans(turn_text)
+            _turn_neutralized = _apply_marker_spans(turn_text, _marker_spans)
         # Where the user's own text lands is resolved HERE rather than
         # reconstructed by the caller, because this is the only code that sees
         # every transform applied to the turn: a rewriting hook, marker

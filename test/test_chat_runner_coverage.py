@@ -1395,6 +1395,7 @@ class TestExpandDollarSkills:
         assert chat_runner._expand_dollar_skills("plain", state, slot, "dashboard:x") == (
             "plain",
             0,
+            [],
         )
 
     def test_resolution_failure_is_audited_and_swallowed(self, tmp_path):
@@ -1405,7 +1406,7 @@ class TestExpandDollarSkills:
         with patch.object(chat_runner, "_get_skills", return_value=skills), _quiet_sel() as sel:
             out = chat_runner._expand_dollar_skills("$broken", state, slot, "dashboard:x")
 
-        assert out == ("$broken", 0)
+        assert out == ("$broken", 0, [])
         assert sel.return_value.log_tool_invocation.call_args.kwargs["outcome"] == "error"
 
     def test_unknown_candidate_is_audited_as_not_found(self, tmp_path):
@@ -1417,7 +1418,7 @@ class TestExpandDollarSkills:
         with patch.object(chat_runner, "_get_skills", return_value=skills), _quiet_sel() as sel:
             out = chat_runner._expand_dollar_skills("$nope", state, slot, "dashboard:x")
 
-        assert out == ("$nope", 0)
+        assert out == ("$nope", 0, [])
         assert sel.return_value.log_tool_invocation.call_args.kwargs["outcome"] == "not_found"
 
     def test_resolved_skill_body_is_appended_and_redacted(self, tmp_path):
@@ -1428,13 +1429,18 @@ class TestExpandDollarSkills:
         ]
 
         with patch.object(chat_runner, "_get_skills", return_value=skills):
-            expanded, count = chat_runner._expand_dollar_skills(
+            expanded, count, blocks = chat_runner._expand_dollar_skills(
                 "run $deploy", state, slot, "dashboard:x"
             )
 
         assert count == 1
         assert "[Skill: deploy]" in expanded
         assert "AKIAIOSFODNN7EXAMPLE" not in expanded
+        # blocks carries the SAME emitter-owned body separately, redacted, for
+        # build_message to emit raw (GPT #9096 placement fix).
+        assert len(blocks) == 1
+        assert blocks[0].startswith("[Skill: deploy]")
+        assert "AKIAIOSFODNN7EXAMPLE" not in blocks[0]
         assert slot.messages[-1]["role"] == "system"
 
 

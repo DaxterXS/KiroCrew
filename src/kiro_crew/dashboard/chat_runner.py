@@ -3664,7 +3664,8 @@ def _expand_dollar_skills(
     state: DashboardState,
     slot: _ChatSlot,
     session_key: str,
-) -> tuple[str, int]:
+    routes_out: dict[str, list[str]] | None = None,
+) -> tuple[str, int, list[str]]:
     """Expand ``$skillname`` tokens anywhere in *message* into appended skill bodies.
 
     Leaves the literal ``$token`` in place (decision (a)) and appends a
@@ -3677,11 +3678,17 @@ def _expand_dollar_skills(
     the runner-side concerns: redaction of the loaded content, a user-visible chip,
     and SEL audit.
 
+    Returns ``(expanded_message, n_skills, blocks)``. ``expanded_message`` keeps
+    the pre-existing "typed text + skill bodies" form (the mirror echo and user-
+    span accounting depend on it). ``blocks`` is the SAME list of ``[Skill:
+    name]`` bodies, handed to ``build_message`` so it can keep those emitter-owned
+    markers out of the user-text scrub by placement (GPT #9096).
+
     Returns ``(expanded_message, count)`` where *count* is the number of skills
     appended (0 if none resolved).
     """
     if "$" not in message:
-        return message, 0
+        return message, 0, []
     skills = _get_skills(state)
     try:
         resolved = skills.resolve_dollar_skills(message, slot.project or None)
@@ -3699,7 +3706,7 @@ def _expand_dollar_skills(
             outcome="error",
             metadata={"reason": "exception", "slot": slot.key},
         )
-        return message, 0
+        return message, 0, []
     if not resolved:
         if skills.has_dollar_candidate(message):
             sel().log_tool_invocation(
@@ -3711,15 +3718,21 @@ def _expand_dollar_skills(
                 outcome="not_found",
                 metadata={"slot": slot.key},
             )
-        return message, 0
+        return message, 0, []
 
     blocks: list[str] = []
     names: list[str] = []
     for _token, name, body in resolved:
         body, _ = redact_credentials(body)
         body, _ = redact_exfiltration_urls(body)
+        # Byte-identical ``[Skill: {name}]`` -- no in-text route token to forge
+        # (GPT #9096). The dollar route is recorded OUT-OF-BAND per OCCURRENCE
+        # (appended to this name's list), so a same-name double-load keeps both
+        # routes rather than overwriting; the classifier reads that map.
         blocks.append(f"[Skill: {name}]\n\n{body}")
         names.append(name)
+        if routes_out is not None:
+            routes_out.setdefault(name, []).append("dollar")
 
     expanded = message + "\n\n" + "\n\n---\n\n".join(blocks)
 
@@ -3729,7 +3742,7 @@ def _expand_dollar_skills(
         "msg msg-info",
     )
     state.push_slots_update()
-    return expanded, len(names)
+    return expanded, len(names), blocks
 
 
 def _should_suppress_requeue(slot) -> bool:
@@ -6955,6 +6968,16 @@ async def _run_chat(
                     metadata={"mention": original.split()[0], "slot": slot.key},
                 )
 
+        # Out-of-band skill->route map for the Context Breakdown panel. The
+        # emitters ($skill expansion here, trigger loading in build_message) fill
+        # it with the route they KNOW at emit time, so the classifier never has to
+        # recover a route from prompt text a skill body could forge (GPT #9096).
+        _skill_routes: dict[str, list[str]] = {}
+        # Resolved $-skill bodies; passed to build_message so it can exempt their
+        # emitter-owned `[Skill: name]` markers from the user-text scrub. Empty
+        # unless $ expansion runs (GPT #9096).
+        _dollar_blocks: list[str] = []
+
         # ── $skill expansion: resolve $name tokens anywhere → append skill body ──
         # Operates ONLY on the user's typed message, never on @prompt-substituted
         # content: `prompt_expanded` is True when an @prompt body replaced `message`
@@ -6971,8 +6994,15 @@ async def _run_chat(
             # trusted project's own root made an existing on-loop cost worse
             # rather than introducing it, so the fix is to move the whole call
             # off the loop instead of narrowing what it may discover.
-            message, _n_skills = await asyncio.to_thread(
-                _expand_dollar_skills, message, state, slot, session_key
+            # `message` keeps the pre-existing expanded form (typed text + skill
+            # bodies) so the mirror echo and user-span accounting are byte-
+            # unchanged. `_dollar_blocks` carries the SAME resolved bodies to
+            # build_message, which exempts their emitter-owned `[Skill: name]`
+            # markers from the user-text scrub -- so a user-TYPED `[Skill: x]` is
+            # still neutralized while an emitter-loaded one is not, making the
+            # occurrence count the classifier sees emitter-owned (GPT #9096).
+            message, _n_skills, _dollar_blocks = await asyncio.to_thread(
+                _expand_dollar_skills, message, state, slot, session_key, _skill_routes
             )
             if _n_skills:
                 sel().log_tool_invocation(
@@ -7225,6 +7255,8 @@ async def _run_chat(
                     prompt_expanded=prompt_expanded,
                 ),
                 user_span_out=_user_span,
+                skill_routes_out=_skill_routes,
+                dollar_skill_blocks=_dollar_blocks,
                 needs_reinjection=_needs_reinjection,
             )
             # The reported span is valid for the message as build_message
@@ -7327,6 +7359,7 @@ async def _run_chat(
                 user_chars=attributable_user_chars(user_typed_len, prompt_expanded=prompt_expanded),
                 user_offset=_user_prepend_offset,
                 user_span=_span_arg,
+                skill_routes=_skill_routes,
             )
             slot_ctx_phase = PHASE_SESSION_START if is_new else PHASE_PER_TURN
             # Named rather than counted: naming only four blocks by hand
