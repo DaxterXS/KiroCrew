@@ -196,21 +196,17 @@ def no_gh(monkeypatch):
     return fake
 
 
-@pytest.fixture
-def parity_repo(tmp_path):
-    """A synthetic repo that resolve_profile.py recognises as Kiro Crew.
+@pytest.fixture(scope="session")
+def _parity_repo_template(tmp_path_factory):
+    """Build the parity repo once per session; ``parity_repo`` copies it per test.
 
-    Carries real copies of both reviewer workflows and both base-ref prompt
-    files, a backend AUTOSDE.yaml, and deliberately NO website/AUTOSDE.yaml so
-    the absent-file fallback path is exercised. One base commit on ``main`` plus
-    one feature commit, so BASE...HEAD is non-empty.
-
-    Both contract workflows are committed on ``main`` - the base branch - not
-    only written to the worktree, because the extractor reads a reviewer's
-    contract out of the base commit. A workflow present only in the checkout is
-    not authority and fails the run closed.
+    Ten git subprocesses plus the workflow/prompt copies were paid on every one
+    of the ~130 tests below (~2.5s each under load, the largest single setup
+    cost in the suite). Session scope is safe because this directory is never
+    handed to a test -- only copied from -- so a test that commits, checks out
+    ``main``, or rewrites a workflow in its copy cannot reach another test's.
     """
-    root = tmp_path / "repo"
+    root = tmp_path_factory.mktemp("parity-seed") / "repo"
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / ".github" / "review-prompts").mkdir(parents=True)
     shutil.copy(GPT_WORKFLOW, root / ".github" / "workflows" / GPT_WORKFLOW.name)
@@ -229,6 +225,31 @@ def parity_repo(tmp_path):
     (root / "changed.py").write_text("VALUE = 1\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "feat(thing): add VALUE\n\nA body line for intent.")
+    return root
+
+
+@pytest.fixture
+def parity_repo(tmp_path, _parity_repo_template):
+    """A synthetic repo that resolve_profile.py recognises as Kiro Crew.
+
+    Carries real copies of both reviewer workflows and both base-ref prompt
+    files, a backend AUTOSDE.yaml, and deliberately NO website/AUTOSDE.yaml so
+    the absent-file fallback path is exercised. One base commit on ``main`` plus
+    one feature commit, so BASE...HEAD is non-empty.
+
+    Both contract workflows are committed on ``main`` - the base branch - not
+    only written to the worktree, because the extractor reads a reviewer's
+    contract out of the base commit. A workflow present only in the checkout is
+    not authority and fails the run closed.
+
+    Each test receives its own ``copytree`` of the session template. The repo
+    has no remote, so nothing recorded in ``.git`` names the template's path;
+    the ``reset --hard`` re-stats the copied files against the index, because a
+    copied checkout otherwise reads as having "unstaged changes" on Windows.
+    """
+    root = tmp_path / "repo"
+    shutil.copytree(_parity_repo_template, root)
+    _git(root, "reset", "--hard", "HEAD")
     return root
 
 

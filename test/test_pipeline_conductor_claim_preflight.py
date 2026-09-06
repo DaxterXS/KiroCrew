@@ -12,6 +12,7 @@ regressing back into the old blind spot.
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -2529,13 +2530,19 @@ class TestAgainstRealGit:
     unlanded. One small real repo pins both.
     """
 
-    @pytest.fixture
-    def clone(self, tmp_path):
-        root = tmp_path / "clone"
+    @pytest.fixture(scope="module")
+    def _clone_template(self, tmp_path_factory):
+        """Build the landed/sidetrack clone once per module; ``clone`` copies it.
+
+        Six git subprocesses (~2.3-4.7s) were previously paid on every one of the
+        8 tests below. Module scope is safe because the template is never handed
+        to a test, only copied from via ``shutil.copytree`` -- no test here moves
+        a branch or adds a commit to it, they only read commits already present.
+        """
+        root = tmp_path_factory.mktemp("claim-preflight-seed") / "clone"
         root.mkdir()
 
         def run_git(*args):
-            rc, out, err = 0, "", ""
             rc, out, err = _git(root, list(args))
             assert rc == 0, f"git {args} failed: {err}"
             return out
@@ -2553,6 +2560,13 @@ class TestAgainstRealGit:
         run_git("commit", "-q", "-m", "elsewhere")
         off_main = run_git("rev-parse", "HEAD")
         run_git("checkout", "-q", "main")
+        return root, on_main, off_main
+
+    @pytest.fixture
+    def clone(self, tmp_path, _clone_template):
+        template_root, on_main, off_main = _clone_template
+        root = tmp_path / "clone"
+        shutil.copytree(template_root, root)
         return root, on_main, off_main
 
     def test_ancestry_distinguishes_landed_from_elsewhere(self, mod, clone):

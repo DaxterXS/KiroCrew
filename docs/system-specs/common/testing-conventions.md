@@ -922,7 +922,12 @@ hour earlier is not a baseline.
    per test. Build it **once** in a `scope="session"` fixture and `shutil.copytree` it
    per test. This is safe only if the template is never handed to a test: copy from
    it rather than yielding it, so nothing one test does can reach another's. Re-point any
-   absolute path the tool recorded (e.g. `git remote set-url`) in the copy.
+   absolute path the tool recorded (e.g. `git remote set-url`) in the copy. On Windows
+   the copy also needs a `git reset --hard HEAD`: the copied files get fresh inode and
+   ctime values, git's index stat cache no longer matches, and the copy reads as having
+   "unstaged changes" -- `git rebase` refuses outright (MEASURED in `test_push_guard`
+   when its repo pair moved to a session template). Nothing in a template is
+   uncommitted, so the reset changes no content; it only re-stats the index.
 3. **A production timeout or poll the test never asserts on.** Fake fixtures are often
    small enough to trip a real retry heuristic, then pay its full budget every test.
    `monkeypatch` the interval to `0`: the branch still executes, only the waiting

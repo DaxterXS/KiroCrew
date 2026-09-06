@@ -66,31 +66,59 @@ def _git(cwd: str, *args: str) -> str:
     return proc.stdout.strip()
 
 
-@pytest.fixture
-def repo_pair(tmp_path):
-    """Create a local 'origin' bare repo and a working clone.
+@pytest.fixture(scope="session")
+def _repo_pair_template(tmp_path_factory) -> tuple[str, str]:
+    """Build the bare origin + initial clone once per session; ``repo_pair`` copies it.
 
-    Returns (clone_dir, origin_dir) where origin_dir is a bare repo and
-    clone_dir has 'origin' pointing at origin_dir.
+    Six git subprocesses (~1-1.6s) were previously paid on every one of the ~40
+    tests below. Session scope is safe because the template directories are
+    never handed to a test, only copied from via ``shutil.copytree`` -- so a
+    test that pushes, branches, or clones ``work2`` off its own copy of
+    ``origin_dir`` cannot reach another test's copy.
     """
-    origin_dir = str(tmp_path / "origin.git")
-    clone_dir = str(tmp_path / "work")
+    root = tmp_path_factory.mktemp("push-guard-seed")
+    origin_dir = str(root / "origin.git")
+    clone_dir = str(root / "work")
 
-    # Create a bare origin with one commit on main.
     os.makedirs(origin_dir)
     _git(origin_dir, "init", "--bare")
     _git(origin_dir, "symbolic-ref", "HEAD", "refs/heads/main")
 
-    # Clone it.
-    _git(str(tmp_path), "clone", origin_dir, "work")
+    _git(str(root), "clone", origin_dir, "work")
     _git(clone_dir, "checkout", "-b", "main")
 
-    # Create an initial commit on main.
     Path(clone_dir, "README.md").write_text("initial\n")
     _git(clone_dir, "add", "README.md")
     _git(clone_dir, "commit", "-m", "initial commit")
     _git(clone_dir, "push", "-u", "origin", "main")
 
+    return clone_dir, origin_dir
+
+
+@pytest.fixture
+def repo_pair(tmp_path, _repo_pair_template):
+    """A local 'origin' bare repo and a working clone, copied from the template.
+
+    Returns (clone_dir, origin_dir) where origin_dir is a bare repo and
+    clone_dir has 'origin' pointing at origin_dir. Each test gets its own copy,
+    so pushes, branches, and `work2` clones (which several tests create
+    alongside this pair) never touch another test's copy.
+    """
+    template_clone, template_origin = _repo_pair_template
+    origin_dir = str(tmp_path / "origin.git")
+    clone_dir = str(tmp_path / "work")
+    shutil.copytree(template_origin, origin_dir)
+    shutil.copytree(template_clone, clone_dir)
+    # The copied clone's remote still points at the TEMPLATE's origin path;
+    # repoint it at this test's own copy so pushes/fetches never reach (or
+    # mutate) the session template or another test's copy.
+    _git(clone_dir, "remote", "set-url", "origin", origin_dir)
+    # copytree resets every file's mtime, which invalidates git's cached
+    # index stat info and makes git see a false "unstaged changes" diff (e.g.
+    # git rebase refuses with "You have unstaged changes"). Nothing in the
+    # template is ever uncommitted, so resetting hard to HEAD is a no-op on
+    # content and forces git to re-stat every file against the real index.
+    _git(clone_dir, "reset", "--hard", "HEAD")
     return clone_dir, origin_dir
 
 
