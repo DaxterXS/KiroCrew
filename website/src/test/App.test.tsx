@@ -31,6 +31,19 @@ const searchWidth = (w: number) => Math.min(480, Math.max(240, w * 0.22))
 function topbarCss(): string {
   return readFileSync(join(__dirname, '..', 'index.css'), 'utf8')
 }
+/** The BASE (no update pill) threshold of one collapse rung, read from the
+ *  stylesheet rather than restated here, so a rung and the test reasoning about
+ *  it cannot drift apart. The `{ ?<selector>{` shape cannot match the
+ *  `.tb-has-update` variants: those carry that class between the brace and the
+ *  selector, and the sibling shift test owns them. */
+function baseRung(selector: string): number {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const m = topbarCss().match(
+    new RegExp(`^\\s*@container \\(max-width:(\\d+)px\\)\\{ ?${esc}\\{display:none\\}`, 'm')
+  )
+  expect(m, `expected a base rung for ${selector}`).not.toBeNull()
+  return Number(m![1])
+}
 /** The three declared tracks of the header grid, whitespace-normalised. */
 function topbarTracks(): { sides: string[]; search: string } {
   const rule = topbarCss().match(/\.topbar\{[^}]*\}/)?.[0] ?? ''
@@ -931,15 +944,50 @@ describe('App routing', () => {
 
   it('keeps the live readouts at the modal desktop widths', () => {
     // The point of the width function, and the reason it is 22vw rather than
-    // something roomier: the widest readout tier measures 518px and its rung
-    // fires at 530px, so the side track has to clear 531 or the numbers are
-    // evicted. The layout this replaces showed full readouts at these widths, so
-    // evicting them would be a regression traded for a bigger inert trigger.
-    const READOUT_RUNG = 530
-    for (const w of [1440, 1600, 1920, 2560]) {
+    // something roomier: the side track has to clear the readout rung or the
+    // numbers are evicted. The layout this replaces showed full readouts at these
+    // widths, so evicting them would be a regression traded for a bigger inert
+    // trigger.
+    //
+    // The rung is READ from the stylesheet, not restated: it used to be 530px --
+    // the first rung of the ladder -- and 530 is now no rung at all, so a
+    // hardcoded constant here would have kept passing while measuring nothing
+    // about the readouts. The widths below the old rung are the ones this test
+    // exists for now: at 1024, 1152, 1280 and 1366 the previous ladder had
+    // already dropped the numbers (issue #8287), so those four fail against the
+    // old order and pass against the new one.
+    const READOUT_RUNG = baseRung('.tb-drop-metrics')
+    for (const w of [1024, 1152, 1280, 1366, 1440, 1600, 1920, 2560]) {
       const perSide = (w - searchWidth(w) - TOPBAR_GAPS) / 2
-      expect(perSide).toBeGreaterThan(READOUT_RUNG)
+      expect(perSide, `readouts evicted at ${w}px`).toBeGreaterThan(READOUT_RUNG)
     }
+  })
+
+  it('drops the live readouts LAST of the three named rungs', () => {
+    // #8287: the readout tier was the FIRST rung to fire, so the header dropped
+    // live CPU/MEM/DSK numbers while keeping a credit figure and a link to a
+    // feedback form. The readouts are the only LIVE data of the three, so they
+    // are the last to go. A lower max-width means the rung fires later, hence the
+    // ordering: metrics < feedback < usage.
+    //
+    // This is the invariant, not the numbers: thresholds get re-measured whenever
+    // the group's chrome or a locale catalog changes its widest form, and this
+    // must survive that. The shifted (update-pill) ladder inherits the order,
+    // because the sibling test above pins every shifted rung at base + the same
+    // measured footprint.
+    const metrics = baseRung('.tb-drop-metrics')
+    const feedback = baseRung('.tb-drop-feedback')
+    const usage = baseRung('.tb-drop-usage')
+    expect(metrics).toBeLessThan(feedback)
+    expect(feedback).toBeLessThan(usage)
+    // The icon stand-in is the readout rung's COMPLEMENT -- it reveals exactly
+    // where the numbers go. If the two drift apart the button renders both forms
+    // at once, or neither.
+    const iconHide = topbarCss().match(
+      /^\s*@container \(min-width:(\d+)px\)\{ ?\.tb-narrow-only\{display:none\}/m
+    )
+    expect(iconHide, 'expected a base reveal threshold for .tb-narrow-only').not.toBeNull()
+    expect(Number(iconHide![1])).toBe(metrics + 1)
   })
 
   it('never makes the search wider than the mirrored-gutter layout above 1376px', () => {

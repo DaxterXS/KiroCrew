@@ -20,6 +20,11 @@
  * this file had already drifted from `App.tsx` before it was made verbatim.
  *
  * ?theme=dark   ?form=mobile|desktop
+ * ?lang=de      which locale catalog to render. Rung budgets are per-locale
+ *               because the readouts' labels are translated (`app.mem` is "MEM"
+ *               in twelve catalogs and "SPEICHER" in de), so the metrics tier is
+ *               widest in German. Default zh-CN, so every figure already
+ *               recorded in index.css reproduces unchanged.
  * ?count=11     the unread count to render in the badge
  * ?update=on    render the top-bar update pill (its presence is conditional in
  *               the shipped header, so the rung budget has TWO bases: with it
@@ -52,6 +57,7 @@ import { createRoot } from 'react-dom/client'
 import { Home, Search, Bell, Lightbulb, Bug, Layers, Coins, AudioWaveform, ChevronDown, Download } from 'lucide-react'
 
 import { initI18n } from '../src/i18n/all'
+import { i18nT } from '../src/i18n/t'
 import '../src/index.css'
 
 const params = new URLSearchParams(location.search)
@@ -89,7 +95,13 @@ if (budget === 'off' || budget === 'nonowrap') {
 }
 const hasUpdateClass = update && budget !== 'off' && budget !== 'norungs'
 document.documentElement.setAttribute('data-theme', theme === 'light' ? 'kiro-light' : 'kiro-dark')
-initI18n('zh-CN')
+// The rung budgets are per-locale, because the readouts' own labels are
+// translated: `app.mem` is "MEM" in twelve catalogs and "SPEICHER" in de, so the
+// metrics tier is widest in German and a budget measured in any other locale is
+// too tight there. Same reason the update pill's shift is measured against de
+// downloading_percent. Default stays zh-CN so every existing measurement in
+// index.css reproduces unchanged; pass `?lang=de` to measure the widest tier.
+initI18n(params.get('lang') || 'zh-CN')
 
 // The retired cue: an alpha mask over the row's last 18px. Injected verbatim so
 // the before state is the shipped one rather than a paraphrase of it.
@@ -236,9 +248,16 @@ function TopBar() {
             <button data-seg data-metrics className={`${seg} gap-2 text-[11px] font-mono${metricsState === 'pending' ? ' opacity-60' : ''}`}>
               <AudioWaveform size={12} className="tb-narrow-only text-accent" />
               <span className={`tb-drop-metrics flex items-center gap-2${metricsState === 'pending' ? ' text-muted' : ''}`}>
+                {/* Labels come from the catalog, exactly as App.tsx renders them
+                    (`i18nT('app.cpu')` …), so the tier's width is measurable in
+                    the locale where it is WIDEST. They were literals here, which
+                    made every locale measure the same and hid the de tier
+                    entirely — the same drift the bell markup had before it was
+                    made verbatim. The values stay literal: they are sample data,
+                    not translated copy. */}
                 {metricsState === 'pending'
-                  ? <><span>CPU —</span><span>MEM —</span><span>DSK —</span></>
-                  : <><span>CPU 1%</span><span>MEM 42%</span><span>DSK 20%</span></>}
+                  ? <><span>{i18nT('app.cpu')} —</span><span>{i18nT('app.mem')} —</span><span>{i18nT('app.dsk')} —</span></>
+                  : <><span>{i18nT('app.cpu')} 1%</span><span>{i18nT('app.mem')} 42%</span><span>{i18nT('app.dsk')} 20%</span></>}
               </span>
             </button>
           )}
@@ -251,8 +270,11 @@ function TopBar() {
         {update ? <UpdatePillLookalike /> : null}
         <span className="tb-drop-feedback flex items-center">
           <span className="flex items-center gap-2 h-7 rounded-xl border border-border bg-card px-3 text-[12px] text-muted">
-            <span className="flex items-center gap-1"><Lightbulb size={13} className="lucide-inline" /> 申请功能</span>
-            <span className="border-l border-border pl-2 flex items-center gap-1"><Bug size={13} className="lucide-inline" /> 反馈问题</span>
+            {/* Labels come from the catalog, as FeedbackPill.tsx renders them, so
+                this tier is measurable in the locale where it is WIDEST: fr and
+                ru run ~190px past the zh-CN form these were hardcoded to. */}
+            <span className="flex items-center gap-1"><Lightbulb size={13} className="lucide-inline" /> {i18nT('app.request_a_feature_2')}</span>
+            <span className="border-l border-border pl-2 flex items-center gap-1"><Bug size={13} className="lucide-inline" /> {i18nT('components.feedbackPill.report_problem')}</span>
           </span>
         </span>
         <BellButton />

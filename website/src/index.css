@@ -1863,16 +1863,44 @@ file-tree-container{
    responds to the space actually handed to it rather than to a viewport
    breakpoint that cannot know what the group currently holds (usage pill
    present or not, resource posture firing, extension segments registered).
-   Rungs drop cheapest-first: metric numbers, then the credit counter, then the
-   feedback labels, then the readouts entirely. */
+   Rungs drop cheapest-first, and "cheapest" is ranked by WHAT THE READER LOSES:
+   the credit counter, then the feedback pill, then the live CPU/MEM/DSK numbers
+   LAST of the three.
+
+   The readout tier used to be the FIRST rung, at 530px. That is the priority
+   inversion the comment at the top of this block already names -- "a wider centre
+   buys a bigger inert trigger by evicting live data" -- arriving from the other
+   side: the ladder itself evicted the live data first. Measured on the shipped
+   stylesheet, the numbers left the header at any window narrower than ~1420px
+   while the credit balance survived to ~1080px and the feedback pill to ~976px,
+   so between those widths the header dropped the health readings and kept a
+   credit figure and two links to a feedback form. The readouts are the only LIVE
+   data of the three and the only one whose value peaks exactly when the window is
+   small, which is what issue #8287 reports.
+
+   Only this rung's threshold moved. The credit and feedback rungs fire at the
+   same widths as before, so nothing else's behaviour changes at any width, and
+   the feedback pill still leaves the header at 340px -- which matters because
+   `onRequestFeature` has exactly ONE call site in the app, so a rung that dropped
+   that pill earlier would make Request a Feature unreachable rather than
+   relocated. Below this rung the numbers still collapse to the icon stand-in,
+   which opens the metrics popover, so no reading becomes unreachable at any
+   width. */
 /* Thresholds are the MEASURED content width of the rung above, plus a small
    margin: the rung must fire before the group gets narrower than its contents,
    because flex children would otherwise absorb the difference by squeezing their
    own text. Measured in capture/topbar-search-variants.tsx — full 518px, without
-   the metric numbers 382px, without the credit counter 330px, icons-only 139px. */
-@container (max-width:530px){ .tb-drop-metrics{display:none} }
+   the credit counter 330px, icons-only 139px.
+   The readout rung's own budget is the state directly above it -- credit counter
+   and feedback pill already dropped, numbers still present -- measured at the
+   WIDEST SHIPPED LOCALE, which for this tier is de: `app.mem` is "MEM" in twelve
+   catalogs and "SPEICHER" in de, so that state is 312px there against 279px
+   elsewhere. Same convention as the update pill's shift below, which already
+   budgets against de; the dev-only en-XA pseudolocale stays excluded, covered by
+   the segments' nowrap backstop. */
 @container (max-width:392px){ .tb-drop-usage{display:none} }
 @container (max-width:340px){ .tb-drop-feedback{display:none} }
+@container (max-width:324px){ .tb-drop-metrics{display:none} }
 /* The update pill shifts the ladder. The pill is a conditional sibling of the
    ladder (present only while an update exists) and it never shrinks, so while
    it is mounted the group's fixed content is wider by the pill's footprint and
@@ -1907,9 +1935,9 @@ file-tree-container{
    content width kept the readouts while the content no longer fit, and flex
    squeeze wrapped them into two clipped lines inside the h-7 capsule. */
 @media (min-width:640px){
-  @container (max-width:738px){ .tb-has-update .tb-drop-metrics{display:none} }
   @container (max-width:600px){ .tb-has-update .tb-drop-usage{display:none} }
   @container (max-width:548px){ .tb-has-update .tb-drop-feedback{display:none} }
+  @container (max-width:532px){ .tb-has-update .tb-drop-metrics{display:none} }
   @container (max-width:408px){ .tb-has-update .tb-capsule > *:not(:first-child){display:none} }
 }
 /* Terminal rung: the capsule keeps only its first child, the connection dot.
@@ -1921,20 +1949,23 @@ file-tree-container{
 @container (max-width:200px){ .tb-capsule > *:not(:first-child){display:none} }
 /* The counterpart: a form that exists ONLY on the narrow rungs (e.g. the metric
    readout's icon stand-in). Both forms ship in the DOM because the rung is a
-   container query — no JS branch here can observe the group's own width. With
-   the update pill the metrics rung fires at 738px, so the stand-in must stay
-   visible through the shifted band; the descendant selector out-specifies the
-   base hide rule. `block` matches what preflight gives the SVG, so the rule
-   stays inert if the button ever stops blockifying its flex children. */
+   container query — no JS branch here can observe the group's own width. These two
+   thresholds are not free parameters: they are the complement of the readout rung
+   above, so they move with it or the button renders both forms at once (or
+   neither). With the update pill the metrics rung fires at 532px, so the stand-in
+   must stay visible through the shifted band; the descendant selector out-specifies
+   the base hide rule. `block` matches what preflight gives the SVG, so the rule
+   stays inert if the button ever stops blockifying its flex children. The pairing
+   is pinned by the rung-order test in src/test/App.test.tsx. */
 /* Probe for the metrics rung, read by App.tsx to decide whether clicking the
    metrics control should toggle the inline readings or open the popover. It
    carries `.tb-drop-metrics` so every rung above -- base and update-shifted --
    applies to it unchanged; keeping it out of flow at 0x0 means it can never
    consume the budget those rungs are measured against. */
 .tb-metrics-probe{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
-@container (min-width:531px){ .tb-narrow-only{display:none} }
+@container (min-width:325px){ .tb-narrow-only{display:none} }
 @media (min-width:640px){
-  @container (min-width:531px) and (max-width:738px){ .tb-has-update .tb-narrow-only{display:block} }
+  @container (min-width:325px) and (max-width:532px){ .tb-has-update .tb-narrow-only{display:block} }
 }
 
 /* The identity group's own rung. The group holds the nav button (phone only) plus
