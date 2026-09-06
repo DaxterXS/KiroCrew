@@ -8177,7 +8177,8 @@
       "side": "Боковой чат",
       "subagents": "Субагенты",
       "summary": "Сводка",
-      "workflows": "Рабочие процессы"
+      "workflows": "Рабочие процессы",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "Все слоты заняты",
@@ -9430,7 +9431,9 @@
         "switch_to_split_view": "Переключиться на раздельный вид",
         "switch_to_unified_view": "Переключиться на единый вид",
         "this_app_render_is_no_longer_available": "Этот рендер приложения больше недоступен. Запустите инструмент снова, чтобы посмотреть его.",
-        "turn_diff": "Изменения за ход"
+        "turn_diff": "Изменения за ход",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "Перейти к любому ходу в этой сессии"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "Не удалось остановить, сессия сброшена",
@@ -9718,6 +9721,10 @@
         "copy_text_failed": "Не удалось скопировать",
         "copy_text_unavailable": "Буфер обмена здесь заблокирован. Текст твоего поста выделен — нажми Ctrl+C / ⌘C. Отредактированный текст карточки скопируй из самой карточки.",
         "export_failed": "Не удалось создать карточку для публикации"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "Пока нет сообщений для структуры"
       }
     },
     "chatPage": {

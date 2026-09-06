@@ -5,7 +5,7 @@ import { safeSetItem } from '../utils/safeStorage'
 import { secureRandomId } from '../utils/secureId'
 
 /** Singleton "view" tabs (opened from the + menu, one instance each). */
-export type ViewKind = 'changes' | 'issues' | 'links' | 'files' | 'artifacts' | 'subagents' | 'workflows' | 'logs' | 'context' | 'side' | 'browser' | 'git' | 'summary' | 'pins'
+export type ViewKind = 'changes' | 'issues' | 'links' | 'files' | 'artifacts' | 'subagents' | 'workflows' | 'logs' | 'context' | 'side' | 'browser' | 'git' | 'summary' | 'pins' | 'outline'
 /** All tab kinds: singleton views + on-demand document/terminal tabs. */
 /** `app` hosts an MCP App (a sandboxed iframe with a live JSON-RPC bridge).
  *  It is deliberately a TabKind and NOT a ViewKind: SidePanel unmounts
@@ -119,6 +119,7 @@ const VIEW_TITLE_KEY: Record<ViewKind, string> = {
   git: 'hooks.usePanelTabs.git',
   summary: 'hooks.usePanelTabs.summary',
   pins: 'hooks.usePanelTabs.pins',
+  outline: 'hooks.usePanelTabs.outline',
 }
 
 /** Localised strip label for a singleton view. */

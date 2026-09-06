@@ -7856,7 +7856,8 @@
       "side": "随手问",
       "subagents": "子代理",
       "summary": "摘要",
-      "workflows": "工作流"
+      "workflows": "工作流",
+      "outline": "大纲"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "所有槽位都已占用",
@@ -9052,7 +9053,9 @@
         "switch_to_split_view": "切换到并排视图",
         "switch_to_unified_view": "切换到统一视图",
         "this_app_render_is_no_longer_available": "此应用渲染已不可用。请重新运行工具以查看。",
-        "turn_diff": "本轮差异"
+        "turn_diff": "本轮差异",
+        "menu_outline": "大纲",
+        "menu_outline_desc": "跳转到本会话中的任意一轮对话"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "停止失败，会话已重置",
@@ -9316,6 +9319,10 @@
         "copy_text_failed": "复制失败",
         "copy_text_unavailable": "当前环境禁止写入剪贴板。文案已选中——按 Ctrl+C / ⌘C 复制。你改过的卡片文字请直接从卡片上复制。",
         "export_failed": "无法生成分享卡片"
+      },
+      "outline": {
+        "outline": "大纲",
+        "no_turns": "暂无可用于大纲的消息"
       }
     },
     "chatPage": {

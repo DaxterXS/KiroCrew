@@ -7856,7 +7856,8 @@
       "side": "사이드 채팅",
       "subagents": "서브에이전트",
       "summary": "요약",
-      "workflows": "워크플로"
+      "workflows": "워크플로",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "모든 슬롯이 사용 중입니다",
@@ -9052,7 +9053,9 @@
         "switch_to_split_view": "분할 보기로 전환",
         "switch_to_unified_view": "통합 보기로 전환",
         "this_app_render_is_no_longer_available": "이 앱 렌더링은 더 이상 사용할 수 없습니다. 도구를 다시 실행해 확인하세요.",
-        "turn_diff": "턴 차이"
+        "turn_diff": "턴 차이",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "이 세션의 모든 대화 차례로 이동"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "중지에 실패하여 세션을 초기화했습니다",
@@ -9316,6 +9319,10 @@
         "copy_text_failed": "복사하지 못했습니다",
         "copy_text_unavailable": "이 환경에서는 클립보드가 차단되어 있습니다. 게시글 텍스트가 선택되어 있으니 Ctrl+C / ⌘C를 누르세요. 편집한 카드 텍스트는 카드에서 직접 복사하세요.",
         "export_failed": "공유 카드를 만들 수 없습니다"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "아직 개요로 표시할 메시지가 없습니다"
       }
     },
     "chatPage": {

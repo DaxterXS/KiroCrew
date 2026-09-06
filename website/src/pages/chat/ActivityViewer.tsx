@@ -6,7 +6,7 @@ import { api } from '../../api/client'
 import { LogViewer } from '../LogsPage'
 import Clickable from '../../components/Clickable'
 import ErrorNotice from '../../components/ErrorNotice'
-import type { SubagentActivity, ToolActivity, Artifact } from '../../types'
+import type { SubagentActivity, ToolActivity, Artifact, ChatMessage } from '../../types'
 import { countDiffStats } from '../../utils/diffLineCounts'
 import { toApiDecision } from '../../utils/approvalDecision'
 import type { ExtractedLink } from '../../utils/extractChatLinks'
@@ -15,15 +15,19 @@ import type { PullRequestLink } from '../../utils/pullRequestLinks'
 import PullRequestPanel from '../../components/PullRequestPanel'
 import IssuePanel from '../../components/IssuePanel'
 import { PinnedMessagesPanel } from './PinnedMessagesPanel'
+import { ChatOutlinePanel, outlineEntries } from './ChatOutlinePanel'
 import type { ChatPin } from '../../api/pins'
 import { useAppSelector, useAppDispatch } from '../../store'
-import { markSubagentApproving, openActivityToTab, selectSubagent, clearTerminalSubagents, sseSubagentDone } from '../../store/chatSlice'
+import { markSubagentApproving, openActivityToTab, selectSubagent, clearTerminalSubagents, sseSubagentDone, selectSlotMessages } from '../../store/chatSlice'
 import SegmentedControl from '../../components/SegmentedControl'
 import { PanelSectionHeader } from '../../components/ui'
 import SideChat from './SideChat'
 import WorkflowSidebarRow, { type WfRunRow } from './WorkflowSidebarRow'
 import { runBelongsToSlot } from '../../apps/workflows/runModel'
 
+// Stable empty list so the outline selector returns a referentially-constant
+// value on every non-Outline render (a fresh `[]` would defeat useMemo).
+const EMPTY_OUTLINE_MESSAGES: ChatMessage[] = []
 import { ContextBreakdownTab } from '../ContextBreakdownPanel'
 import SessionSummaryTab from './SessionSummaryTab'
 import { i18nT } from '../../i18n/t'
@@ -847,7 +851,7 @@ export default function ActivityViewer({ subagents, toolLog, open, onToggle, slo
   chatMode?: string
   /** When set, render ONLY this view and hide the internal SegmentedControl.
    *  Used by SidePanel, which owns the top-level tab strip. */
-  view?: 'changes' | 'issues' | 'subagents' | 'logs' | 'context' | 'links' | 'artifacts' | 'side' | 'workflows' | 'git' | 'summary' | 'pins'
+  view?: 'changes' | 'issues' | 'subagents' | 'logs' | 'context' | 'links' | 'artifacts' | 'side' | 'workflows' | 'git' | 'summary' | 'pins' | 'outline'
 }) {
   const dispatch = useAppDispatch()
   const [, setSelected] = useState(0)
@@ -888,6 +892,13 @@ export default function ActivityViewer({ subagents, toolLog, open, onToggle, slo
   // 1-click transcript: a chip row click selects an agent — ensure it is
   // rendered (even past the cap), scrolled to, expanded, and disk-loaded.
   const selectedSubagentId = useAppSelector(s => s.chat.selectedSubagentId)
+  // Outline rows are the session's user turns, derived from the same redux
+  // messages the transcript renders — no server fetch, no separate data model.
+  // Only projected when the Outline tab is the one being shown, so the other
+  // views never pay for the map. The jump the rows use is `onJumpToPin`, which
+  // is generic (jump to a loaded message by ts/mid), not pin-specific.
+  const outlineSlotMessages = useAppSelector(s => (view === 'outline' ? selectSlotMessages(s, slot) : EMPTY_OUTLINE_MESSAGES))
+  const outlineList = useMemo(() => outlineEntries(outlineSlotMessages), [outlineSlotMessages])
   const dispatchRedux = useAppDispatch()
   useEffect(() => {
     if (selectedSubagentId && !visibleIds.includes(selectedSubagentId) && ids.includes(selectedSubagentId)) {
@@ -1008,7 +1019,7 @@ export default function ActivityViewer({ subagents, toolLog, open, onToggle, slo
         <div className="px-3 py-2 shrink-0 flex justify-center">
           <SegmentedControl
             segments={TABS}
-            value={effectiveTab === 'context' || effectiveTab === 'git' || effectiveTab === 'summary' || effectiveTab === 'pins' ? tab : effectiveTab}
+            value={effectiveTab === 'context' || effectiveTab === 'git' || effectiveTab === 'summary' || effectiveTab === 'pins' || effectiveTab === 'outline' ? tab : effectiveTab}
             onChange={t => { setTab(t); explicitTab.current = true; dispatch(openActivityToTab(t)) }}
             layoutId="activity-tab"
           />
@@ -1215,6 +1226,15 @@ export default function ActivityViewer({ subagents, toolLog, open, onToggle, slo
             mode={chatMode}
             onJumpToMessage={onJumpToPin ?? (() => {})}
             onUnpin={onUnpin ?? (() => {})}
+          />
+        </div>
+      )}
+
+      {effectiveTab === 'outline' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ChatOutlinePanel
+            entries={outlineList}
+            onJumpToMessage={onJumpToPin ?? (() => {})}
           />
         </div>
       )}

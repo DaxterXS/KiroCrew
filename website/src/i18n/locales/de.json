@@ -7963,7 +7963,8 @@
       "side": "Seitenchat",
       "subagents": "Subagenten",
       "summary": "Zusammenfassung",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "Alle Slots sind belegt",
@@ -9178,7 +9179,9 @@
         "switch_to_split_view": "Zur geteilten Ansicht wechseln",
         "switch_to_unified_view": "Zur einheitlichen Ansicht wechseln",
         "this_app_render_is_no_longer_available": "Diese App-Darstellung ist nicht mehr verfügbar. Führen Sie das Tool erneut aus, um sie anzuzeigen.",
-        "turn_diff": "Zug-Diff"
+        "turn_diff": "Zug-Diff",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "Zu einer beliebigen Runde in dieser Sitzung springen"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "Stoppen fehlgeschlagen, Sitzung zurückgesetzt",
@@ -9450,6 +9453,10 @@
         "copy_text_failed": "Kopieren fehlgeschlagen",
         "copy_text_unavailable": "Die Zwischenablage ist hier blockiert. Dein Beitragstext ist markiert — drücke Strg+C / ⌘C. Bearbeiteten Kartentext kopierst du direkt aus der Karte.",
         "export_failed": "Die Share-Karte konnte nicht erzeugt werden"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "No messages to outline yet"
       }
     },
     "chatPage": {

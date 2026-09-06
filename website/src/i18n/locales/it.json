@@ -8070,7 +8070,8 @@
       "side": "Chat laterale",
       "subagents": "Subagenti",
       "summary": "Riepilogo",
-      "workflows": "Workflow"
+      "workflows": "Workflow",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "Tutti gli slot sono occupati",
@@ -9304,7 +9305,9 @@
         "switch_to_split_view": "Passa alla vista divisa",
         "switch_to_unified_view": "Passa alla vista unificata",
         "this_app_render_is_no_longer_available": "Questo rendering dell'app non è più disponibile. Esegui di nuovo lo strumento per visualizzarlo.",
-        "turn_diff": "Diff del turno"
+        "turn_diff": "Diff del turno",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "Vai a qualsiasi turno di questa sessione"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "Arresto non riuscito, sessione reimpostata",
@@ -9584,6 +9587,10 @@
         "copy_text_failed": "Copia non riuscita",
         "copy_text_unavailable": "Gli appunti sono bloccati qui. Il testo del tuo post è selezionato: premi Ctrl+C / ⌘C. Il testo della card che hai modificato va copiato dalla card stessa.",
         "export_failed": "Impossibile generare la scheda di condivisione"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "No messages to outline yet"
       }
     },
     "chatPage": {

@@ -2874,6 +2874,7 @@
       "links": "Links",
       "issues": "Issues",
       "logs": "Logs",
+      "outline": "Outline",
       "pins": "Pins",
       "side": "Side Chat",
       "subagents": "Subagents",
@@ -3343,6 +3344,8 @@
         "menu_logs_desc": "Gateway log stream",
         "menu_pins": "Pins",
         "menu_pins_desc": "Messages you bookmarked in this session",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "Jump to any turn in this session",
         "menu_side": "Side Chat",
         "menu_side_desc": "Ask without interrupting the main agent",
         "menu_subagents": "Subagents",
@@ -3546,6 +3549,10 @@
       "earlierMessagesBar": {
         "load_failed": "Couldn't load earlier messages",
         "retry": "Retry"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "No messages to outline yet"
       },
       "pins": {
         "copy_failed": "Copy failed"

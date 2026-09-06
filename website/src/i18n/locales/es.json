@@ -8070,7 +8070,8 @@
       "side": "Chat lateral",
       "subagents": "Subagentes",
       "summary": "Resumen",
-      "workflows": "Flujos de trabajo"
+      "workflows": "Flujos de trabajo",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "Todos los slots están ocupados",
@@ -9304,7 +9305,9 @@
         "switch_to_split_view": "Cambiar a la vista dividida",
         "switch_to_unified_view": "Cambiar a la vista unificada",
         "this_app_render_is_no_longer_available": "Esta representación de la app ya no está disponible. Ejecuta la herramienta de nuevo para verla.",
-        "turn_diff": "Diff del turno"
+        "turn_diff": "Diff del turno",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "Salta a cualquier turno de esta sesión"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "No se pudo detener, sesión restablecida",
@@ -9584,6 +9587,10 @@
         "copy_text_failed": "No se pudo copiar",
         "copy_text_unavailable": "El portapapeles está bloqueado aquí. El texto de tu publicación está seleccionado: pulsa Ctrl+C / ⌘C. El texto de la tarjeta que hayas editado, cópialo desde la propia tarjeta.",
         "export_failed": "No se pudo generar la tarjeta para compartir"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "No messages to outline yet"
       }
     },
     "chatPage": {

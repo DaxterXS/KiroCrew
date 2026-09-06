@@ -7963,7 +7963,8 @@
       "side": "সাইড চ্যাট",
       "subagents": "সাবএজেন্ট",
       "summary": "সারসংক্ষেপ",
-      "workflows": "ওয়ার্কফ্লো"
+      "workflows": "ওয়ার্কফ্লো",
+      "outline": "Outline"
     },
     "useSceneInteraction": {
       "all_slots_are_occupied": "সব স্লট ভর্তি",
@@ -9178,7 +9179,9 @@
         "switch_to_split_view": "স্প্লিট ভিউতে যাও",
         "switch_to_unified_view": "ইউনিফায়েড ভিউতে যাও",
         "this_app_render_is_no_longer_available": "এই অ্যাপ রেন্ডার আর উপলব্ধ নেই। এটি দেখতে টুলটি আবার চালান।",
-        "turn_diff": "টার্ন ডিফ"
+        "turn_diff": "টার্ন ডিফ",
+        "menu_outline": "Outline",
+        "menu_outline_desc": "এই সেশনের যেকোনো টার্নে যান"
       },
       "stopEventCard": {
         "stop_failed_session_reset": "থামানো ব্যর্থ, সেশন রিসেট হয়েছে",
@@ -9450,6 +9453,10 @@
         "copy_text_failed": "কপি করা যায়নি",
         "copy_text_unavailable": "এখানে ক্লিপবোর্ড ব্লক করা আছে। তোমার পোস্টের লেখাটা সিলেক্ট করা আছে — Ctrl+C / ⌘C চাপো। কার্ডের যে লেখা তুমি বদলেছ, সেটা কার্ড থেকেই কপি করো।",
         "export_failed": "শেয়ার কার্ড তৈরি করা যায়নি"
+      },
+      "outline": {
+        "outline": "Outline",
+        "no_turns": "রূপরেখার জন্য এখনও কোনো বার্তা নেই"
       }
     },
     "chatPage": {
