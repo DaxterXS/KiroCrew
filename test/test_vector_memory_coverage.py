@@ -23,7 +23,12 @@ from typing import Callable
 import pytest
 
 from kiro_crew import vector_memory as vm
-from kiro_crew.vector_memory import VectorMemoryStore, _lesson_display_text
+from kiro_crew.vector_memory import (
+    VectorMemoryStore,
+    _lesson_display_text,
+    _lesson_scope,
+    _lesson_scope_unusable,
+)
 
 
 def _lesson_texts(store: VectorMemoryStore) -> list[str]:
@@ -384,6 +389,72 @@ class TestDeleteLesson:
         store = _store(tmp_path)
         assert store.write_lesson("Always pin the release tag before publishing a wheel")
         assert store.delete_lesson("something that is simply not there") is False
+
+    def test_exact_scope_delete_spares_the_global_twin(self, tmp_path: Path) -> None:
+        # A global and a repo-scoped copy of ONE rule are distinct records
+        # (keyed by _lesson_key(rule, repo_scope)). Deleting the scoped copy by
+        # exact (rule, repo_scope) identity must leave the global copy intact --
+        # the scope-blind substring path would remove both, an unrecoverable
+        # user_explicit hard delete. This is the test whose absence let the
+        # data-loss path through.
+        rule = "Prefer tabs over spaces"
+        store = _store(tmp_path)
+        assert store.write_lesson(rule)  # global
+        assert store.write_lesson(rule, repo_scope="src/kiro_crew")  # scoped
+        assert len(store.get_lessons()) == 2
+
+        # Delete only the scoped copy.
+        assert store.delete_lesson(rule, "src/kiro_crew", exact=True) is True
+        remaining = store.get_lessons()
+        assert len(remaining) == 1
+        # The survivor is the GLOBAL copy (no repo_scope).
+        assert _lesson_scope(json.loads(remaining[0]["value_json"])) is None
+
+        # Deleting the global copy leaves nothing, and does not need a scope.
+        assert store.delete_lesson(rule, None, exact=True) is True
+        assert store.get_lessons() == []
+
+    def test_exact_delete_does_not_match_a_substring(self, tmp_path: Path) -> None:
+        # exact=True must require the WHOLE rendered text to match, so a
+        # fragment of one rule cannot delete a different, longer rule.
+        store = _store(tmp_path)
+        assert store.write_lesson("Always pin the release tag before publishing a wheel")
+        assert store.delete_lesson("release tag", None, exact=True) is False
+        assert len(store.get_lessons()) == 1
+
+    def test_exact_global_delete_spares_a_malformed_scope_row(self, tmp_path: Path) -> None:
+        # A row whose repo_scope is a non-string (from an import or hand edit)
+        # reads as _lesson_scope==None, same as a genuinely global row -- so a
+        # global exact delete (want_scope None) must NOT sweep it up. It is
+        # withheld from injection for being unusable; it must likewise be
+        # withheld from exact deletion, or deleting the global copy of a rule
+        # would hard-delete the malformed row that shares its text.
+        import json as _json
+        import sqlite3 as _sqlite3
+
+        store = _store(tmp_path)
+        rule = "Prefer tabs over spaces"
+        assert store.write_lesson(rule)  # a genuine global row
+        # Inject a malformed-scope row sharing the rule text directly into the
+        # semantic table -- no write path accepts a non-string scope, so the
+        # only way to reach the store's malformed-row state is to write the row.
+        key = "lesson.malformed_scope_row"
+        val = _json.dumps({"rule": rule, "category": "knowledge", "repo_scope": ["oops"]})
+        with _sqlite3.connect(store._db_path) as _conn:
+            _conn.execute(
+                "INSERT INTO semantic_memory "
+                "(key, value_json, confidence, source, created_at, updated_at, is_deleted) "
+                "VALUES (?, ?, 1.0, 'user_explicit', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0)",
+                (key, val),
+            )
+            _conn.commit()
+        assert len(store.get_lessons()) == 2
+
+        # Delete the GLOBAL copy. The malformed row must survive.
+        assert store.delete_lesson(rule, None, exact=True) is True
+        remaining = store.get_lessons()
+        assert len(remaining) == 1
+        assert _lesson_scope_unusable(_json.loads(remaining[0]["value_json"])) is True
 
 
 class TestContradictionCandidateBlobRecovery:

@@ -3575,9 +3575,32 @@ class VectorMemoryStore:
         )
         return int(rows[0]["n"]) if rows else 0
 
-    def delete_lesson(self, rule_substring: str) -> bool:
-        """Delete lessons whose value contains rule_substring."""
+    def delete_lesson(
+        self,
+        rule_substring: str,
+        repo_scope: str | None = None,
+        *,
+        exact: bool = False,
+    ) -> bool:
+        """Delete lessons matching *rule_substring*.
+
+        Two modes, because a scoped lesson and its global twin share rule text
+        but are DISTINCT records (keyed by ``_lesson_key(rule, repo_scope)``):
+
+        - ``exact=True`` (the dashboard/user delete path): match the rendered
+          lesson text EXACTLY and require the row's ``repo_scope`` to equal
+          *repo_scope*. This is what lets a user delete the scoped copy of a
+          rule without also destroying the global copy of the same rule — a
+          substring match on display text (which never carries scope) removes
+          both, an unrecoverable ``user_explicit`` hard-delete. The list surface
+          hands back the same display text and scope it showed, so the pair
+          identifies exactly one row.
+        - ``exact=False`` (legacy substring behaviour): unchanged, so callers
+          that still delete by a rule fragment keep working. ``repo_scope`` is
+          ignored in this mode.
+        """
         deleted = False
+        want_scope = repo_scope.strip() if isinstance(repo_scope, str) and repo_scope.strip() else None
         for e in self.get_lessons():
             val = json.loads(e["value_json"])
             # Match against the rendered lesson text so a mapping-shaped row is
@@ -3585,9 +3608,23 @@ class VectorMemoryStore:
             # substring like "category" delete every imported lesson). Rows with
             # no lesson shape fall back to str() so junk rows stay deletable.
             text = _lesson_display_text(val) or str(val)
-            if rule_substring.lower() in text.lower():
-                self.delete_semantic(e["key"], "user_explicit")
-                deleted = True
+            if exact:
+                # A row whose repo_scope is PRESENT but unusable (a non-string
+                # from an imported/hand-edited row) reads as _lesson_scope==None,
+                # same as a genuinely global row -- so a global delete
+                # (want_scope is None) would also match and hard-delete it. It is
+                # withheld from injection for the same reason (it was meant to be
+                # scoped and we cannot tell where), so it must also be withheld
+                # from exact deletion rather than silently swept up with the
+                # global copy. It stays deletable via the legacy substring path.
+                if _lesson_scope_unusable(val):
+                    continue
+                if text != rule_substring or _lesson_scope(val) != want_scope:
+                    continue
+            elif rule_substring.lower() not in text.lower():
+                continue
+            self.delete_semantic(e["key"], "user_explicit")
+            deleted = True
         return deleted
 
     def get_lessons_context(
