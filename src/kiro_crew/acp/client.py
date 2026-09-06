@@ -183,7 +183,11 @@ from kiro_crew.sandbox import (
 )
 from kiro_crew.security import is_sensitive_path, redact_credentials, redact_exfiltration_urls
 from kiro_crew.sel import sel
-from kiro_crew.session_directive import content_free_digest
+from kiro_crew.session_directive import (
+    MAX_TOOL_RESULT_CHARS,
+    content_free_digest,
+    preserve_tail_marker,
+)
 from kiro_crew.skill_usage import get_global_skill_read_observer
 
 logger = logging.getLogger(__name__)
@@ -2551,6 +2555,20 @@ def _kill_escaped_children(child_pids: dict[int, int | None] | dict[int, ChildRe
             logger.debug("Killed escaped child PID %d", cpid)
         except (ProcessLookupError, OSError):
             pass
+
+
+_JSONL_PART_MAX_CHARS = 4000
+
+
+def _bounded_part(text: str) -> str:
+    """Bound one replayed output part, keeping a tail-anchored control marker.
+
+    This per-PART cut sits upstream of the frame-level one, so bounding the joined
+    frame is not enough on its own: a directive marker at the end of an oversized
+    part is already gone by the time the join is bounded, and the effect is
+    silently dropped while the model has been told it was requested.
+    """
+    return preserve_tail_marker(text, text[:_JSONL_PART_MAX_CHARS])
 
 
 def _make_unified_diff(old: str, new: str, path: str, max_len: int = 65536) -> str:
@@ -7875,7 +7893,15 @@ class AcpClient:
         # slice keeps "://user:password" and drops the "@" the prefilter needs,
         # so the password reaches the dashboard in clear text. Same ordering as
         # `_dispatch._build_tool_result_event` and as `_compaction_detail` below.
-        final_output = redact_text(final_output)[:8000]
+        _full = redact_text(final_output)
+        # Bound, then re-attach a tail-anchored marker the cut removed. Both
+        # sentinels sit at the END of the frame, and redaction can GROW the text
+        # (a credential becomes a longer placeholder), so bounding after redaction
+        # is necessary but still not enough on its own. `_dispatch`'s builder does
+        # exactly this at its own cut; without it here, the recovery above can push
+        # a marker past the limit and the directive is silently dropped -- the
+        # effect never applies while the model has been told it was requested.
+        final_output = preserve_tail_marker(_full, _full[:MAX_TOOL_RESULT_CHARS])
         return AcpEvent(
             kind=EVENT_TOOL_RESULT,
             tool_call_id=tool_use_id,
@@ -8037,7 +8063,7 @@ class AcpClient:
                                 if isinstance(d, dict) and "stdout" in d:
                                     out = d.get("stdout", "")
                                     if out:
-                                        output_parts.append(out[:4000])
+                                        output_parts.append(_bounded_part(out))
                                 else:
                                     # See the rawOutput Json branch above: a dump
                                     # escapes an embedded directive marker beyond
@@ -8046,20 +8072,25 @@ class AcpClient:
                                         _marker_bearing_text(d) if isinstance(d, dict) else None
                                     )
                                     if _marker is not None:
-                                        output_parts.append(_marker[:4000])
+                                        output_parts.append(_bounded_part(_marker))
                                     else:
-                                        output_parts.append(json.dumps(d, indent=2)[:4000])
+                                        output_parts.append(_bounded_part(json.dumps(d, indent=2)))
                             elif rc.get("kind") == "text":
-                                output_parts.append(str(rc.get("data", ""))[:4000])
+                                output_parts.append(_bounded_part(str(rc.get("data", ""))))
                         if output_parts:
+                            _joined = "\n".join(output_parts)
+                            _whole = _repair_escaped_marker(_joined) or _joined
                             results.append(
                                 AcpEvent(
                                     kind=EVENT_TOOL_RESULT,
                                     tool_call_id=tool_use_id,
-                                    tool_output=(
-                                        _repair_escaped_marker("\n".join(output_parts))
-                                        or "\n".join(output_parts)
-                                    )[:8000],
+                                    # Same marker-preserving cut as the live path
+                                    # above: a replayed frame carries directives
+                                    # too, and a tail marker lost to the bound is
+                                    # a dropped effect either way.
+                                    tool_output=preserve_tail_marker(
+                                        _whole, _whole[:MAX_TOOL_RESULT_CHARS]
+                                    ),
                                 )
                             )
         except Exception:

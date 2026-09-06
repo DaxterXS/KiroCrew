@@ -34,6 +34,7 @@ from source_corpus import parsed_candidates, src_root
 
 from kiro_crew import session_directive as sd
 from kiro_crew.acp import _dispatch
+from kiro_crew.acp import client as _client_module
 from kiro_crew.acp._dispatch import (
     ELIDED_MARKER_VALUE,
     UNSERIALISABLE_SIBLING_VALUE,
@@ -515,6 +516,112 @@ class TestRecoveryIsKindAgnostic:
         assert sd.peek(out) == (kind, DIRECTIVE_PAYLOADS[kind])
 
 
+class TestTheClientCutKeepsTheTailMarker:
+    """``AcpClient`` bounds its tool output too, and must not cut the marker off.
+
+    Both sentinels are tail-anchored, so any cut applied to the frame can remove
+    the very token that decides whether the frame is a directive. ``_dispatch``'s
+    builder re-attaches it after its own bound; this client did not, at any of
+    its THREE cuts -- the live frame bound, the replay path's per-PART bound
+    (upstream of the frame bound, so a marker was already gone before the join
+    was measured), and the replay frame bound. An oversized frame -- which the
+    escaped-marker recovery can itself produce, since it moves preserved text
+    AHEAD of the marker -- silently dropped the effect while the model had been
+    told it was requested.
+
+    Redaction is why bounding afterwards is not sufficient on its own: replacing a
+    credential with a placeholder can make the text LONGER, so a frame that fitted
+    before redaction can exceed the bound after it.
+
+    Every test also asserts the bound is still ENFORCED, so the fix cannot
+    degenerate into "stop truncating".
+    """
+
+    @staticmethod
+    def _output(update: dict[str, object]) -> str | None:
+        fake = types.SimpleNamespace(_session_id="sess-1")
+        msg = JsonRpcMessage(method="session/update", params={"update": update})
+        event = AcpClient._extract_tool_call_update(fake, msg)
+        return event.tool_output if event else None
+
+    @staticmethod
+    def _oversized(tail: str) -> str:
+        return "x" * (sd.MAX_TOOL_RESULT_CHARS + 500) + "\n" + tail
+
+    @staticmethod
+    def _replay(tmp_path, monkeypatch, session_id: str, parts: list[dict[str, str]]) -> list[str]:
+        monkeypatch.setattr(_client_module, "kiro_sessions_dir", lambda: tmp_path)
+        (tmp_path / ("%s.jsonl" % session_id)).write_text(
+            json.dumps(
+                {
+                    "kind": "ToolResults",
+                    "data": {
+                        "content": [
+                            {
+                                "kind": "toolResult",
+                                "data": {"toolUseId": "tc-" + session_id, "content": parts},
+                            }
+                        ]
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        client = AcpClient.__new__(AcpClient)
+        client._session_id = session_id
+        client._jsonl_pos = 0
+        return [e.tool_output or "" for e in client._read_new_tool_results_sync()]
+
+    def test_the_live_path_reattaches_the_marker(self):
+        out = self._output(
+            _update(content=[{"content": {"type": "text", "text": self._oversized(_monitor())}}])
+        )
+        assert out is not None
+        assert len(out) <= sd.MAX_TOOL_RESULT_CHARS, "the bound is still enforced"
+        assert sd.peek(out) == ("monitor_start", MONITOR_ARGS), "the marker survived the cut"
+
+    def test_the_live_path_reattaches_a_refusal_tag(self):
+        # The refusal sentinel is tail-anchored for the same reason, and losing it
+        # makes a by-design decline read as a lost marker.
+        tagged = sd.tag_refusal("Error: monitor_start arguments are too large.")
+        out = self._output(
+            _update(content=[{"content": {"type": "text", "text": self._oversized(tagged)}}])
+        )
+        assert out is not None and sd.is_refusal(out)
+
+    def test_the_jsonl_replay_part_cut_reattaches_the_marker(self, tmp_path, monkeypatch):
+        outputs = self._replay(
+            tmp_path,
+            monkeypatch,
+            "part",
+            [{"kind": "text", "data": self._oversized(_monitor())}],
+        )
+        assert outputs, "the replay produced an event"
+        assert all(len(o) <= sd.MAX_TOOL_RESULT_CHARS for o in outputs), "the bound holds"
+        assert any(sd.peek(o) == ("monitor_start", MONITOR_ARGS) for o in outputs)
+
+    def test_the_jsonl_replay_frame_cut_reattaches_the_marker(self, tmp_path, monkeypatch):
+        # Parts that each fit can still join past the frame bound, so the frame cut
+        # needs the same treatment as the per-part one.
+        parts = [{"kind": "text", "data": "z" * 3500} for _ in range(3)]
+        parts.append({"kind": "text", "data": _monitor()})
+        outputs = self._replay(tmp_path, monkeypatch, "join", parts)
+        assert outputs, "the replay produced an event"
+        assert all(len(o) <= sd.MAX_TOOL_RESULT_CHARS for o in outputs), "the bound holds"
+        assert any(sd.peek(o) == ("monitor_start", MONITOR_ARGS) for o in outputs)
+
+    def test_the_bound_is_still_enforced_for_marker_free_output(self):
+        out = self._output(
+            _update(
+                content=[
+                    {"content": {"type": "text", "text": "y" * (sd.MAX_TOOL_RESULT_CHARS + 500)}}
+                ]
+            )
+        )
+        assert out is not None and len(out) == sd.MAX_TOOL_RESULT_CHARS
+
+
 class TestSurvivesTheAcpClientParser:
     """``providers/acp.py``'s own builder, ``AcpClient._extract_tool_call_update``:
     a second, independent parser with the same envelope shapes and the same
@@ -978,6 +1085,65 @@ class TestPathologicallyNestedEnvelopeDegrades:
             cache_scope="scope",
         )
         assert [e for e in events if e.kind == EVENT_TOOL_RESULT], "the result event still arrives"
+
+
+class TestSalvageIsPerBranchNotPerField:
+    """The encoder-refusal degrade must cut only the branch that overflows.
+
+    A per-FIELD reduce -- probe each top-level child, keep or replace it whole --
+    replaces a container that holds BOTH a healthy branch and an overflowing one,
+    so a readable status vanishes for its neighbour's sake. Probing per branch
+    descends into that container and cuts only the bad chain.
+
+    The one place descent must NOT happen is a single-entry container: it is a
+    link in a chain with no sibling to rescue, and descending it rebuilds the
+    depth the encoder refused, which then costs the whole frame. Both directions
+    are pinned here. Encoder ceilings are simulated (see
+    :func:`_encoder_refusing_past`) so the depths mean the same on every platform.
+    """
+
+    def test_a_healthy_branch_nested_beside_a_bad_one_survives_whole(self, monkeypatch):
+        marker = _monitor()
+        payload = {"out": marker, "result": {"fine": _nest(10, CANARY), "bad": _nest(200, "x")}}
+        monkeypatch.setattr(_dispatch, "json", _encoder_refusing_past(20))
+        dumped = _dispatch._dumps_elided_siblings(payload, marker)
+        assert dumped is not None
+        result = json.loads(dumped)["result"]
+        assert isinstance(result, dict), "the shared parent was descended, not replaced"
+        assert _leaf(result["fine"]) == CANARY, "the healthy branch keeps its leaf"
+        assert result["bad"] == UNSERIALISABLE_SIBLING_VALUE, "only the bad branch is cut"
+
+    def test_a_scalar_beside_a_bad_branch_survives(self, monkeypatch):
+        marker = _monitor()
+        payload = {
+            "out": marker,
+            "result": {"status": "ok", "exit_status": 7, "bad": _nest(200, 0)},
+        }
+        monkeypatch.setattr(_dispatch, "json", _encoder_refusing_past(20))
+        dumped = _dispatch._dumps_elided_siblings(payload, marker)
+        assert dumped is not None
+        result = json.loads(dumped)["result"]
+        assert result["status"] == "ok" and result["exit_status"] == 7
+
+    def test_a_single_entry_chain_is_cut_not_descended(self, monkeypatch):
+        # Descending the chain would keep it down to its encodable tail and put
+        # the frame back over the ceiling -- the unrelated sibling then pays.
+        marker = _monitor()
+        payload = {"out": marker, "fine": _nest(10, CANARY), "chain": _nest(400, 0)}
+        monkeypatch.setattr(_dispatch, "json", _encoder_refusing_past(20))
+        dumped = _dispatch._dumps_elided_siblings(payload, marker)
+        assert dumped is not None
+        restored = json.loads(dumped)
+        assert _leaf(restored["fine"]) == CANARY, "the unrelated sibling is intact"
+        assert restored["chain"] == UNSERIALISABLE_SIBLING_VALUE, "the chain is cut, named"
+
+    def test_a_top_level_healthy_branch_still_survives(self, monkeypatch):
+        # The case the per-field rule already handled must not regress.
+        marker = _monitor()
+        payload = {"out": marker, "fine": _nest(10, CANARY), "bad": _nest(200, 0)}
+        monkeypatch.setattr(_dispatch, "json", _encoder_refusing_past(20))
+        dumped = _dispatch._dumps_elided_siblings(payload, marker)
+        assert dumped is not None and _leaf(json.loads(dumped)["fine"]) == CANARY
 
 
 class TestDispatchEncodeRefusalDegrades:

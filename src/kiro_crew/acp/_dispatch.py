@@ -1322,43 +1322,96 @@ def _dumps_elided_siblings(payload: Any, marker: str) -> str | None:
     reached, and the failure is the same uncaught ``RecursionError`` that kills
     the turn.
 
-    Degrades per FIELD rather than all-or-nothing, because the two possible
+    Degrades per BRANCH rather than all-or-nothing, because the two possible
     losses are not symmetric. A lost directive silently unarms a loop the model
     was told was armed -- there is no error anywhere and no way to notice. Lost
     sibling detail costs transcript content the user can SEE is missing. So the
-    marker (emitted by the caller, not here) always survives, every top-level
-    field that encodes is kept whole, and only the offending branches become
-    :data:`UNSERIALISABLE_SIBLING_VALUE`. Returns None only when even the reduced
-    object will not encode, leaving the caller to emit the directive alone.
+    marker (emitted by the caller, not here) always survives, every subtree that
+    encodes is kept whole at full depth, and only the branches that actually
+    overflow become :data:`UNSERIALISABLE_SIBLING_VALUE`. Returns None only when
+    even the reduced object will not encode, leaving the caller to emit the
+    directive alone.
+
+    Per BRANCH, not per top-level field: a field holding a readable status AND
+    an overflowing branch under one parent must keep the status, so a rejected
+    container is looked inside when it has more than one entry -- one of them may
+    be encodable. A single-entry container is a link in a chain with no sibling
+    to rescue, and descending it is actively harmful: it preserves the chain down
+    to its encodable tail and so reassembles the depth the encoder refused, which
+    then costs the WHOLE frame. Those are cut where they stand.
     """
     elided = _elide_marker_value(payload, marker)
     try:
         return json.dumps(elided, default=str)
     except RecursionError:
         pass
-
-    def _encodable(value: Any) -> bool:
-        try:
-            json.dumps(value, default=str)
-        except RecursionError:
-            return False
-        return True
-
-    # Re-encoding the survivors together adds exactly one level over the deepest
-    # of them, which each one just cleared on its own -- but a value sitting on
-    # the boundary can still fail there, so the outer dump stays guarded too.
-    if isinstance(elided, dict):
-        reduced: Any = {
-            k: (v if _encodable(v) else UNSERIALISABLE_SIBLING_VALUE) for k, v in elided.items()
-        }
-    elif isinstance(elided, list):
-        reduced = [(v if _encodable(v) else UNSERIALISABLE_SIBLING_VALUE) for v in elided]
-    else:
+    if not isinstance(elided, (dict, list)):
         return None
+    # Re-encoding the survivors together can still exceed the ceiling -- each
+    # one cleared it alone, and the frame around them adds depth -- so the outer
+    # dump stays guarded too.
     try:
-        return json.dumps(reduced, default=str)
+        return json.dumps(_salvaged_per_branch(elided), default=str)
     except RecursionError:
         return None
+
+
+# Encode probes one salvage may spend. Each probe serialises one subtree, so an
+# unbounded count is quadratic in the payload; past the budget a rejected
+# container is cut where it stands.
+_MAX_SALVAGE_PROBES = 512
+
+
+def _encodable(value: Any) -> bool:
+    """Whether ``json.dumps`` can encode *value* without overflowing its C stack."""
+    try:
+        json.dumps(value, default=str)
+    except RecursionError:
+        return False
+    return True
+
+
+def _salvaged_per_branch(value: Any) -> Any:
+    """Copy *value*, keeping every subtree the encoder accepts at its FULL depth.
+
+    A child that encodes is attached as-is and never looked inside -- one probe,
+    nothing lost, however deep it is. A child that does not encode is descended
+    when it holds more than one entry (one of them may be an encodable branch
+    worth rescuing) and replaced outright when it holds one (a chain link with
+    nothing to rescue; see :func:`_dumps_elided_siblings` for why descending a
+    chain is worse than cutting it). Iterative over a heap stack, for the same
+    reason :func:`_elide_marker_value` is: the input is by definition deep
+    enough to break a C recursion.
+    """
+    probes = [_MAX_SALVAGE_PROBES]
+
+    def _shell(node: Any) -> Any:
+        return {} if isinstance(node, dict) else []
+
+    root = _shell(value)
+    pending: list[tuple[Any, Any]] = [(value, root)]
+    while pending:
+        source, target = pending.pop()
+        items = source.items() if isinstance(source, dict) else enumerate(source)
+        for key, child in items:
+            if not isinstance(child, (dict, list)):
+                copied: Any = child
+            elif probes[0] <= 0:
+                copied = UNSERIALISABLE_SIBLING_VALUE
+            else:
+                probes[0] -= 1
+                if _encodable(child):
+                    copied = child  # whole, at full depth
+                elif len(child) > 1:
+                    copied = _shell(child)
+                    pending.append((child, copied))
+                else:
+                    copied = UNSERIALISABLE_SIBLING_VALUE
+            if isinstance(target, dict):
+                target[key] = copied
+            else:
+                target.append(copied)
+    return root
 
 
 def _repair_escaped_marker(text: str) -> str | None:
