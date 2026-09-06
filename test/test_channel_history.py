@@ -331,7 +331,12 @@ class TestChannelHistoryContext:
         h.push("C123", "alice", "pipeline broke")
         h.push("C123", "bob", "checking us-west-2")
 
-        builder = ContextBuilder(channel_history=h)
+        # skills=SkillsLoader(install_builtins=False): these tests exercise
+        # channel-history injection, not the builtin-skills sync that a
+        # default SkillsLoader() performs on every construction (~20s each).
+        from kiro_crew.skills import SkillsLoader
+
+        builder = ContextBuilder(channel_history=h, skills=SkillsLoader(install_builtins=False))
         msg, _ = builder.build_message("what's going on?", False, channel_id="C123")
 
         assert "pipeline broke" in msg
@@ -341,11 +346,12 @@ class TestChannelHistoryContext:
     def test_context_builder_no_injection_without_channel_id(self):
         """ContextBuilder does NOT inject channel history for DMs (no channel_id)."""
         from kiro_crew.context import ContextBuilder
+        from kiro_crew.skills import SkillsLoader
 
         h = ChannelHistory()
         h.push("C123", "alice", "secret channel message")
 
-        builder = ContextBuilder(channel_history=h)
+        builder = ContextBuilder(channel_history=h, skills=SkillsLoader(install_builtins=False))
         msg, _ = builder.build_message("hello", False)
 
         assert "secret channel message" not in msg
@@ -353,8 +359,9 @@ class TestChannelHistoryContext:
     def test_context_builder_no_injection_without_history(self):
         """ContextBuilder works fine with no channel_history set."""
         from kiro_crew.context import ContextBuilder
+        from kiro_crew.skills import SkillsLoader
 
-        builder = ContextBuilder()
+        builder = ContextBuilder(skills=SkillsLoader(install_builtins=False))
         msg, _ = builder.build_message("hello", False, channel_id="C123")
 
         assert msg.startswith("hello")

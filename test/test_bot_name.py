@@ -29,10 +29,20 @@ class TestSanitizeBotName:
 
 
 class TestBotNameSubstitution:
+    # `ContextBuilder()` defaults to a real `SkillsLoader()`, whose
+    # `install_builtins=True` default syncs the whole builtin-skills tree to
+    # disk (~20s, unrelated to bot_name substitution). These tests only touch
+    # `_substitute_bot_name`, a pure string op, so skip that sync explicitly.
+    @staticmethod
+    def _no_install_skills():
+        from kiro_crew.skills import SkillsLoader
+
+        return SkillsLoader(install_builtins=False)
+
     def test_custom_name_substituted(self):
         from kiro_crew.context import ContextBuilder
 
-        ctx = ContextBuilder(bot_name="Alita")
+        ctx = ContextBuilder(bot_name="Alita", skills=self._no_install_skills())
         assert ctx._substitute_bot_name("You are {bot_name} 🐾") == "You are Alita 🐾"
 
     def test_empty_defaults_from_config(self):
@@ -43,19 +53,19 @@ class TestBotNameSubstitution:
         # When provider is ACP, default bot_name is "Kiro"
         with patch("kiro_crew.context.KiroCrewConfig.load") as mock_cfg:
             mock_cfg.return_value.agent.provider = "acp"
-            ctx = ContextBuilder(bot_name="")
+            ctx = ContextBuilder(bot_name="", skills=self._no_install_skills())
             assert ctx._substitute_bot_name("You are {bot_name}.") == "You are Kiro."
 
         # When provider is claude_code, default bot_name is "KiroCrew"
         with patch("kiro_crew.context.KiroCrewConfig.load") as mock_cfg:
             mock_cfg.return_value.agent.provider = "claude_code"
-            ctx = ContextBuilder(bot_name="")
+            ctx = ContextBuilder(bot_name="", skills=self._no_install_skills())
             assert ctx._substitute_bot_name("You are {bot_name}.") == "You are KiroCrew."
 
     def test_no_placeholder_is_noop(self):
         from kiro_crew.context import ContextBuilder
 
-        ctx = ContextBuilder(bot_name="Alita")
+        ctx = ContextBuilder(bot_name="Alita", skills=self._no_install_skills())
         assert ctx._substitute_bot_name("No placeholder here.") == "No placeholder here."
 
     def test_self_referential_no_recursion(self):
@@ -63,5 +73,5 @@ class TestBotNameSubstitution:
         from kiro_crew.context import ContextBuilder
 
         name = _sanitize_bot_name("{bot_name}")
-        ctx = ContextBuilder(bot_name=name)
+        ctx = ContextBuilder(bot_name=name, skills=self._no_install_skills())
         assert ctx._substitute_bot_name("You are {bot_name}.") == "You are bot_name."

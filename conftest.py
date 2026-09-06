@@ -988,6 +988,33 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     return xdist_budget.resolve_workers()
 
 
+def _join_install_receipt_workers() -> None:
+    """Join any ``install_receipt.dispatch()`` worker before this test's pins lift.
+
+    ``dispatch()`` hands the receipt write to a daemon thread. The worker receives
+    every environment-derived input (the data home, the config fields) from the
+    dispatching thread and reads nothing itself -- but a thread still alive when
+    ``monkeypatch`` undoes ``KIROCREW_HOME`` is a thread whose WRITE lands after the
+    test that owned it is gone. The per-test probe in the 5x hygiene run saw exactly
+    that: the ``kirocrew-install-receipt`` thread alive after teardown in 3 of 5
+    runs, and once a receipt secret written into the operator's real ``~/.kiro/crew``.
+
+    Structural rather than opt-in, for the same reason as the CWD restore below: the
+    test that leaks is never the test that fails, so relying on each
+    dispatch-triggering test to remember ``wait_for_pending_receipt_writes()`` is the
+    shape that let this through. It lives in the ``tryfirst`` teardown hook for the
+    ordering reason documented on ``pytest_runtest_teardown``: an autouse fixture
+    from this conftest is an OUTER fixture and would tear down AFTER ``monkeypatch``
+    had already restored the environment. With no worker registered this is one
+    lock acquire; the module is looked up rather than imported so a test run that
+    never touches the receipt path pays nothing.
+    """
+    mod = sys.modules.get("kiro_crew.apps.install_receipt")
+    waiter = getattr(mod, "wait_for_pending_receipt_writes", None)
+    if waiter is not None:
+        waiter()
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_teardown(item, nextitem):
     """Put the process working directory back, BEFORE any fixture teardown runs.
@@ -1022,6 +1049,7 @@ def pytest_runtest_teardown(item, nextitem):
     directory for its own duration keeps working, and ``monkeypatch.chdir`` (which reverts
     itself, and whose undo lands on the same value) remains the right tool inside a test.
     """
+    _join_install_receipt_workers()
     if _SESSION_CWD is None:  # pragma: no cover - configure always runs first
         return
     try:

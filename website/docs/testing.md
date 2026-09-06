@@ -236,6 +236,39 @@ into a deterministic local failure. Keep the forced delay in place while you ver
 the fix, then remove it: a fix that only passes once the delay is gone has not been
 shown to fix anything.
 
+### What five full runs under load found
+
+Five back-to-back `vitest run --coverage` passes on a Windows host that was also
+running the backend suite (so every fork was starved) turned up 19 intermittent
+cases and one deterministic Windows failure. They fall into four shapes, and each
+one is a rule:
+
+- **A `React.lazy` boundary races the 1000ms default.** `findByTitle('Copy patch')`
+  waits for `PierrePatch`'s header, which only exists once the
+  `import('./PierreImpl')` chunk resolves and commits; under load that took longer
+  than a second in 3 of 5 runs. The same for `PierreWorkspaceTree`'s `@pierre/trees`
+  chunk. When the element you query sits behind a dynamic import, pass an explicit
+  timeout (`{ timeout: 5000 }`) **and say which lazy boundary it is waiting for** in a
+  comment, so the next reader knows the wait is a chunk load and not a guess.
+- **Expensive engines built per test hit the 15s `testTimeout`.**
+  `approvalOneShotDecisionRule.test.ts` constructed a new `ESLint` instance — which
+  re-parses `eslint.config.js` and the whole plugin graph — inside `lint()`, for 17
+  snippets. Build stateless engines once at module scope.
+- **Fake filesystems and source scans must be Windows-neutral.** Two Electron suites
+  failed on Windows every run: `crash-collector.test.js` keyed a fake `fs` by
+  `path.join(...)` (backslashes) but passed the bare literal `"/reports"` to the code
+  under test, so the prefix match read back empty; `window-lifecycle.test.js`
+  scanned module source for `"}\n"` and a `core.autocrlf` checkout gave it `"}\r\n"`.
+  Build fixture keys with `path.normalize`, and normalise `\r\n` before regex-scanning
+  a source file. Run `npm test` on a Windows checkout before calling an Electron test
+  done — CI's Electron job is Linux-only, so nothing else will.
+- **`mkdtempSync` without an `after()` is a leak on every run.** `petOverlay.test.js`
+  created a `cc-pet-test-*` user-data dir per `stubElectron()` call and its
+  `restore()` never removed it; `store-rename-migration.test.js` did the same with
+  `kc-store-*`. Together they left 64 directories in the real temp dir per run. Track
+  every temp dir the file creates and remove them in one top-level `after()` (or in
+  the helper's own `restore()`), with `fs.rmSync(dir, { recursive: true, force: true })`.
+
 ## Manual procedures
 
 A few flows are deliberately not automated. They are documented rather than

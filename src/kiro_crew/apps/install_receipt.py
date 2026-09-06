@@ -20,9 +20,11 @@ import re
 import secrets
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from kiro_crew import __version__, beacon, platform_compat
 from kiro_crew.apps.manifest import KEBAB_RE
@@ -46,7 +48,7 @@ _SECRET_FILE = "app_receipt_secret"
 _SECRET_RE = re.compile(r"[0-9a-f]{64}")
 
 
-def receipt_secret(*, create: bool = True) -> str:
+def receipt_secret(*, create: bool = True, config_dir: Path | None = None) -> str:
     """Return the receipt-only local secret, generating it on first use.
 
     Mirrors ``beacon.install_id``'s atomic create (owner-only temp file +
@@ -54,9 +56,17 @@ def receipt_secret(*, create: bool = True) -> str:
     secret. Every failure returns ``""`` and the caller skips the receipt — a
     receipt is best-effort and must never fail an install or force state into
     existence. With ``create=False`` the file is only read, never generated.
+
+    ``config_dir`` lets a caller pass an already-resolved directory instead of
+    letting this function call ``beacon.config_dir()`` itself. This matters
+    when the call happens on a background thread: ``beacon.config_dir()``
+    honors ``KIROCREW_HOME`` at call time, so resolving it lazily on the
+    worker thread risks reading a different (e.g. unpatched, real-home) value
+    than what the dispatching thread saw. Defaults to ``beacon.config_dir()``
+    for callers that are already on a safe thread (e.g. direct callers, tests).
     """
     try:
-        path = beacon.config_dir() / _SECRET_FILE
+        path = (config_dir if config_dir is not None else beacon.config_dir()) / _SECRET_FILE
         if path.exists():
             existing = beacon._read_state(path)
             if _SECRET_RE.fullmatch(existing):
@@ -132,13 +142,8 @@ def receipt_url(
     if kind not in _KINDS:
         raise ValueError("invalid install kind")
 
-    query = urllib.parse.urlencode(
-        {"t": token, "k": kind, "v": beacon.release(app_version)}
-    )
-    return (
-        f"{endpoint.rstrip('/')}/b/{beacon.BEACON_SCHEMA}/install/"
-        f"{app_slug}?{query}"
-    )
+    query = urllib.parse.urlencode({"t": token, "k": kind, "v": beacon.release(app_version)})
+    return f"{endpoint.rstrip('/')}/b/{beacon.BEACON_SCHEMA}/install/" f"{app_slug}?{query}"
 
 
 def should_send(*, enabled: bool, official: bool, acked: bool) -> beacon.Verdict:
@@ -161,14 +166,20 @@ def send(
     official: bool,
     acked: bool,
     kind: str,
+    config_dir: Path | None = None,
 ) -> bool:
-    """Best-effort GET. Every refusal and transport failure returns ``False``."""
+    """Best-effort GET. Every refusal and transport failure returns ``False``.
+
+    ``config_dir``: forwarded to :func:`receipt_secret` unchanged — see that
+    function's docstring for why a background-thread caller must pass an
+    already-resolved directory rather than let it resolve lazily.
+    """
     if not endpoint:
         return False
     try:
         if not should_send(enabled=enabled, official=official, acked=acked).ok:
             return False
-        secret = receipt_secret()
+        secret = receipt_secret(config_dir=config_dir)
         token = receipt_token(secret, app_slug)
         if not token:
             return False
@@ -197,32 +208,116 @@ def send(
         return False
 
 
-def _send_configured(app_slug: str, *, official: bool, kind: str) -> None:
-    """Load current config and send inside the worker thread."""
+def _send_configured(
+    app_slug: str,
+    *,
+    official: bool,
+    kind: str,
+    config_dir: Path,
+    endpoint: str,
+    enabled: bool,
+    acked: bool,
+) -> None:
+    """Send inside the worker thread, from values the caller already resolved.
+
+    Every input that depends on the process environment -- ``config_dir`` and
+    the three config fields ``send`` reads -- is resolved by ``dispatch()`` on
+    the dispatching thread and passed in. ``beacon.config_dir()`` and
+    ``KiroCrewConfig.load()`` both honor ``KIROCREW_HOME`` at the moment they
+    are called; resolving either on this worker thread would race a test's
+    teardown unpatching ``KIROCREW_HOME`` before this thread gets scheduled,
+    and send the receipt secret to the real data home instead of the pinned
+    test one. The worker therefore reads nothing from the environment.
+    """
     try:
-        config = KiroCrewConfig.load()
         send(
-            config.telemetry.beacon_endpoint,
+            endpoint,
             app_slug,
             app_version=__version__,
-            enabled=config.telemetry.beacon_enabled,
+            enabled=enabled,
             official=official,
-            acked=config.dashboard.privacy_acked,
+            acked=acked,
             kind=kind,
+            config_dir=config_dir,
         )
     except Exception:
         logger.debug("install receipt worker failed (ignored)", exc_info=True)
+    finally:
+        with _pending_lock:
+            _pending_threads.discard(threading.current_thread())
+
+
+# Tracks in-flight dispatch() worker threads so tests can block until they
+# finish (see wait_for_pending_receipt_writes) instead of leaving one alive
+# past teardown, where it would resolve paths against whatever KIROCREW_HOME
+# happens to be set to next.
+_pending_lock = threading.Lock()
+_pending_threads: set[threading.Thread] = set()
+
+# wait_for_pending_receipt_writes() waits at most this long for dispatch()'s
+# worker threads to finish before giving up. Matches the bounded-poll style
+# used by kiro_crew.metrics.provider._wait_for_in_flight_consent_worker.
+_PENDING_WAIT_BOUND_SECS = 10.0
+_PENDING_WAIT_POLL_SECS = 0.01
+
+
+def wait_for_pending_receipt_writes(timeout: float = _PENDING_WAIT_BOUND_SECS) -> None:
+    """Block until every ``dispatch()`` worker thread has finished, or raise.
+
+    Test-only: call this before undoing a ``KIROCREW_HOME`` monkeypatch (or
+    any other per-test env override) so no receipt worker is still alive to
+    resolve paths against a different value once the patch is gone. Raises
+    ``RuntimeError`` if a worker is still running past ``timeout`` — a test
+    must never proceed with a live stale worker able to touch real paths.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        with _pending_lock:
+            live = {t for t in _pending_threads if isinstance(t, threading.Thread) and t.is_alive()}
+            _pending_threads.intersection_update(live)
+            if not live:
+                return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "wait_for_pending_receipt_writes: an install-receipt worker "
+                f"is still running after {timeout}s; a test must never "
+                "proceed with a live stale worker able to resolve paths "
+                "against an unpatched KIROCREW_HOME"
+            )
+        time.sleep(_PENDING_WAIT_POLL_SECS)
 
 
 def dispatch(app_slug: str, *, official: bool, kind: str) -> None:
     """Start a detached daemon sender without delaying the completed install."""
     if not official:
         return
+    # Resolved HERE, on the caller's thread, while KIROCREW_HOME (or whatever
+    # pinned it) is still in effect — then handed to the worker as arguments.
+    # The worker must not call beacon.config_dir() or KiroCrewConfig.load()
+    # itself: by the time it runs, a test may already have undone the very env
+    # override that made those resolve to the pinned test home.
     with contextlib.suppress(Exception):
-        threading.Thread(
+        config_dir = beacon.config_dir()
+        config = KiroCrewConfig.load()
+        thread = threading.Thread(
             target=_send_configured,
             args=(app_slug,),
-            kwargs={"official": True, "kind": kind},
+            kwargs={
+                "official": True,
+                "kind": kind,
+                "config_dir": config_dir,
+                "endpoint": config.telemetry.beacon_endpoint,
+                "enabled": config.telemetry.beacon_enabled,
+                "acked": config.dashboard.privacy_acked,
+            },
             name="kirocrew-install-receipt",
             daemon=True,
-        ).start()
+        )
+        with _pending_lock:
+            _pending_threads.add(thread)
+        try:
+            thread.start()
+        except Exception:
+            with _pending_lock:
+                _pending_threads.discard(thread)
+            raise
