@@ -32,6 +32,7 @@ from kiro_crew.security import (
     redact_credentials,
     redact_exfiltration_urls,
     sanitized_oauth_endpoint,
+    sanitized_oauth_endpoint_display,
     scan_exfiltration_urls,
     scan_history,
     should_record_observe_history,
@@ -2939,6 +2940,53 @@ class TestSanitizedOAuthEndpoint:
     )
     def test_unparseable_urls_return_none(self, url: str) -> None:
         assert sanitized_oauth_endpoint(url) is None
+
+
+class TestSanitizedOAuthEndpointDisplay:
+    """``sanitized_oauth_endpoint_display`` owns the copy-ready contract: it
+    returns a pasteable ``host/path`` string or ``None``, so no consumer has to
+    re-derive the raw helper's internal redaction/truncation sentinels.
+    """
+
+    GITHUB_TOKEN = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234"
+
+    def test_pasteable_endpoint_is_joined(self) -> None:
+        assert (
+            sanitized_oauth_endpoint_display("https://idp.example/realms/dev/authorize")
+            == "idp.example/realms/dev/authorize"
+        )
+
+    def test_empty_path_defaults_to_root(self) -> None:
+        assert sanitized_oauth_endpoint_display("https://idp.example") == "idp.example/"
+
+    def test_credential_in_path_returns_none_not_a_redacted_join(self) -> None:
+        # The raw helper hands back ("idp.example", "[REDACTED: credential]");
+        # the display helper must refuse it rather than join into
+        # "idp.example[REDACTED: credential]", which reads as pasteable and is not.
+        raw = sanitized_oauth_endpoint(f"https://idp.example/{self.GITHUB_TOKEN}/authorize")
+        assert raw is not None and raw[1] == security.REDACTED_CREDENTIAL_TAG
+        assert (
+            sanitized_oauth_endpoint_display(f"https://idp.example/{self.GITHUB_TOKEN}/authorize")
+            is None
+        )
+
+    def test_truncated_path_returns_none(self) -> None:
+        # A benign but pathologically long path is truncated with an ellipsis by
+        # the raw helper; a chopped path is not a real endpoint, so display refuses it.
+        long_url = "https://idp.example/" + ("segment-" * 40) + "/authorize"
+        raw = sanitized_oauth_endpoint(long_url)
+        assert raw is not None and raw[1].endswith("\u2026")
+        assert sanitized_oauth_endpoint_display(long_url) is None
+
+    def test_unnameable_host_returns_none(self) -> None:
+        assert (
+            sanitized_oauth_endpoint_display(f"https://{self.GITHUB_TOKEN}.example/authorize")
+            is None
+        )
+
+    @pytest.mark.parametrize("url", ["", "not a url", "https://user:pass@idp.example/authorize"])
+    def test_none_cases(self, url: str) -> None:
+        assert sanitized_oauth_endpoint_display(url) is None
 
 
 class TestOperatorOAuthEndpointExtension:

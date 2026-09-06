@@ -66,7 +66,10 @@ from kiro_crew.connections.tool_test import _classify as _classify_tool_inventor
 from kiro_crew.loop_lock import LoopBoundLock
 from kiro_crew.mcp_grant import grant_fingerprint, grant_observed
 from kiro_crew.mcp_utils import mcp_server_alias
-from kiro_crew.security import oauth_url_contains_credential
+from kiro_crew.security import (
+    oauth_url_contains_credential,
+    sanitized_oauth_endpoint_display,
+)
 from kiro_crew.sel import sel
 from kiro_crew.session_pid import register_protected_pid, unregister_protected_pid
 
@@ -103,6 +106,14 @@ class MintState(TypedDict, total=False):
     state: str  # minting | waiting | granted | failed | expired
     oauth_url: str
     reason: str
+    # Sanitized "host/path" of a URL the credential gate rejected, set alongside
+    # reason == "mint_url_rejected" so the card can name WHICH endpoint tripped
+    # the scanner (the oauth_endpoints.json remedy needs the exact host+path).
+    # Carried on the card view, never through a log or audit surface: the value
+    # is host+path only (query/PKCE material excluded) and self-redacts a
+    # credential-bearing path, but routing it through the logger is exactly what
+    # tripped Semgrep/CodeQL in PR #7739 round 1, so it stays on this channel.
+    rejected_endpoint: str
     started: float
     token: str  # row identity; see _new_mint_token
     client: Any
@@ -919,12 +930,25 @@ async def start_oauth_mint(
 
             async with _mints_lock:
                 if _mints.get(slug, {}).get("token") == my_token:
-                    _mints[slug] = {
+                    failed: MintState = {
                         "state": "failed",
                         "reason": "mint_url_rejected",
                         "started": time.monotonic(),
                         "token": my_token,
                     }
+                    # Name the endpoint on the CARD (not the log): without the
+                    # host+path the user cannot know what to write into
+                    # oauth_endpoints.json, so the failure reads as unfixable.
+                    # The display helper owns the copy-ready contract -- it hands
+                    # back a pasteable "host/path" string or None (unnameable
+                    # host, userinfo, unparseable, OR a redacted/truncated path
+                    # that is not pasteable), so this call site never re-derives
+                    # the helper's internal sentinels. None leaves the card on
+                    # its unnamed message.
+                    display = sanitized_oauth_endpoint_display(oauth_url)
+                    if display is not None:
+                        failed["rejected_endpoint"] = display
+                    _mints[slug] = failed
             await asyncio.to_thread(_log_mint_outcome, slug, "error", "reason=mint_url_rejected")
             return
 
@@ -1139,4 +1163,8 @@ def pending_mint_for(slug: str) -> MintState | None:
         view["oauth_url"] = entry["oauth_url"]
     if entry.get("reason"):
         view["reason"] = entry["reason"]
+    if entry.get("rejected_endpoint"):
+        # Rides only with reason == "mint_url_rejected". Sanitized host+path, so
+        # it is safe on this card channel; see the field's note on MintState.
+        view["rejected_endpoint"] = entry["rejected_endpoint"]
     return view

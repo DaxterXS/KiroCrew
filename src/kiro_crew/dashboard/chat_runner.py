@@ -265,7 +265,7 @@ from kiro_crew.security import (
     redact_and_truncate,
     redact_credentials,
     redact_exfiltration_urls,
-    sanitized_oauth_endpoint,
+    sanitized_oauth_endpoint_display,
 )
 from kiro_crew.sel import sel
 from kiro_crew.session import SessionClosingError, SpeculativeResumeRefused
@@ -1818,11 +1818,12 @@ def _emit_mcp_oauth_request(
             server_name or "(unknown)",
         )
         # Name the endpoint so case 2 is actionable: without the host+path the
-        # user cannot know what to write into oauth_endpoints.json. The helper
-        # returns host and path ONLY (query/PKCE material is never echoed) and
-        # self-redacts a credential-bearing path, so surfacing it does not
-        # weaken the rejection.
-        endpoint = sanitized_oauth_endpoint(oauth_url)
+        # user cannot know what to write into oauth_endpoints.json. The display
+        # helper owns the copy-ready contract -- it returns a pasteable
+        # "host/path" or None (unnameable host/userinfo/unparseable, OR a
+        # redacted or truncated path that must not be surfaced as if pasteable),
+        # so this banner never renders "host[REDACTED: credential]".
+        endpoint = sanitized_oauth_endpoint_display(oauth_url)
         rejected_meta: dict[str, Any] = {
             "server_name": safe_name,
             "failed": True,
@@ -1832,20 +1833,15 @@ def _emit_mcp_oauth_request(
         }
         endpoint_detail = ""
         if endpoint is not None:
-            rejected_host, rejected_path = endpoint
             # The dashboard's failed-banner renderer (McpOAuthBanner) displays
-            # meta["error"], not the content string — the endpoint must ride in
-            # the error field to actually reach the user's screen. The banner
-            # content below additionally spells the oauth_endpoints.json entry
-            # shape, so text + error together carry the whole remedy; no extra
-            # meta keys are emitted because no surface reads them.
+            # meta["error"], not the content string -- the endpoint must ride in
+            # the error field to actually reach the user's screen; no extra meta
+            # keys are emitted because no surface reads them.
             rejected_meta["error"] = (
-                "URL contained credential or exfiltration pattern "
-                f"(endpoint: {rejected_host}{rejected_path})"
+                "URL contained credential or exfiltration pattern " f"(endpoint: {endpoint})"
             )
             endpoint_detail = (
-                f" The rejected authorization endpoint was "
-                f"{rejected_host}{rejected_path} (query values withheld)."
+                f" The rejected authorization endpoint was " f"{endpoint} (query values withheld)."
             )
         slot.append(
             "mcp_oauth",
@@ -1853,9 +1849,9 @@ def _emit_mcp_oauth_request(
             f"pattern (rejected).{endpoint_detail} If this is a self-hosted "
             "or otherwise unlisted identity provider, its authorization "
             "endpoint may need adding to oauth_endpoints.json in the Kiro "
-            'Crew data home, shaped {"additional_authorization_endpoints": '
-            '[{"host": ..., "path": ...}]}; otherwise ask the server owner '
-            "to fix the URL.",
+            "Crew data home; see the guide at "
+            "docs/guides/connecting-remote-oauth-mcp-server.md for the exact "
+            "entry to add. Otherwise ask the server owner to fix the URL.",
             "msg msg-warn",
             meta=rejected_meta,
         )

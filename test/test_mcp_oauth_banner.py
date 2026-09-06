@@ -246,7 +246,10 @@ class TestEmitMcpOAuthRequest:
         # the endpoint must ride there to actually reach the user's screen.
         assert "unlisted-idp.example/realms/dev/authorize" in m["meta"]["error"]
         # The banner names the expected file shape so the user knows what to write.
-        assert "additional_authorization_endpoints" in m["content"]
+        # The banner names the file and points to the guide for the exact entry
+        # to add, rather than embedding a JSON schema in a chat line (UX #7765).
+        assert "oauth_endpoints.json" in m["content"]
+        assert "connecting-remote-oauth-mcp-server.md" in m["content"]
         # No extra meta keys: no shipped surface reads any, so none are emitted.
         assert "rejected_host" not in m["meta"]
         assert "rejected_path" not in m["meta"]
@@ -257,8 +260,10 @@ class TestEmitMcpOAuthRequest:
         assert "topsecretstatevalue" not in serialized
 
     def test_redacted_path_never_echoes_the_credential(self):
-        """A credential-bearing path self-redacts to the shared tag before it
-        reaches the error field or the banner text."""
+        """A credential-bearing path is not pasteable, so the banner names NO
+        endpoint (sanitized_oauth_endpoint_display returns None) and falls back
+        to the unnamed rejection -- it never surfaces host[REDACTED: credential]
+        as if it were an entry a user could write. The credential never leaks."""
         slot = _ChatSlot("s1")
         state = MagicMock()
         token = "ghp_" "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12"
@@ -269,7 +274,13 @@ class TestEmitMcpOAuthRequest:
             f"https://idp.example/{token}/authorize?state=x",
         )
         m = slot.messages[0]
-        assert "idp.example[REDACTED: credential]" in m["meta"]["error"]
+        # No endpoint named: neither the redaction tag nor a partial host rides
+        # the error field or the content -- the whole point of the display guard.
+        assert "REDACTED" not in json.dumps(m, ensure_ascii=False)
+        assert "endpoint:" not in m["meta"]["error"]
+        assert "The rejected authorization endpoint was" not in m["content"]
+        # Still a usable rejection: it names the remedy file.
+        assert "oauth_endpoints.json" in m["content"]
         assert token not in json.dumps(m, ensure_ascii=False)
 
     def test_rejection_banner_survives_unparseable_url(self):

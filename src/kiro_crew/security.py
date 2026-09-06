@@ -16783,6 +16783,35 @@ def sanitized_oauth_endpoint(url: str) -> tuple[str, str] | None:
     return host, path
 
 
+def sanitized_oauth_endpoint_display(url: str) -> str | None:
+    """A rejected endpoint as a single ``host/path`` string SAFE TO SURFACE as
+    copy-ready text, or ``None`` when no such string can be produced.
+
+    :func:`sanitized_oauth_endpoint` answers the raw ``(host, path)`` and, by
+    contract, may hand back a path that is NOT pasteable -- the shared redaction
+    tag when the path itself carried a credential, or a ``…``-truncated path
+    when it was pathologically long. Joining either of those inline produces
+    ``host[REDACTED: credential]`` or a chopped path presented as if a user
+    could type it into ``oauth_endpoints.json``; that is worse than naming
+    nothing, because it reads as actionable and is not.
+
+    This is the copy-ready contract, owned HERE rather than re-derived at each
+    call site: a consumer that wants a nameable endpoint asks this and either
+    gets a string it can surface verbatim or ``None`` and falls back to its
+    unnamed message. Both current consumers (the mint-failure card and the chat
+    OAuth banner) use it, and any third consumer inherits the guarantee by
+    default instead of having to know the helper's internal sentinels.
+    """
+    endpoint = sanitized_oauth_endpoint(url)
+    if endpoint is None:
+        return None
+    host, path = endpoint
+    # A redacted or truncated path is not pasteable -- see the docstring.
+    if path == _REDACTED_CREDENTIAL_TAG or path.endswith("\u2026"):
+        return None
+    return f"{host}{path}"
+
+
 # Standard replacement tag for a redacted credential. Shared between the batch
 # redactor (`redact_credentials`) and the streaming fail-closed path
 # (`StreamRedactor.feed`) so the on-the-wire marker is identical everywhere.
