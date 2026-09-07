@@ -3218,7 +3218,9 @@ async def api_file_search(request: web.Request) -> web.Response:
         proj = os.environ.get("KIROCREW_PROJECT_DIR", "")
         if proj and os.path.isdir(proj):
             search_roots.append(proj)
-        mc_workspace = str(data_home() / "workspace")
+        from kiro_crew.config.loader import workspace_dir_for  # noqa: F811
+
+        mc_workspace = str(workspace_dir_for(None))
         if os.path.isdir(mc_workspace):
             search_roots.append(mc_workspace)
 

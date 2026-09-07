@@ -107,7 +107,11 @@ DB_PATH: Path | None = None
 
 def research_dir() -> Path:
     """Research workspace dir, resolved against the live data home."""
-    return RESEARCH_DIR if RESEARCH_DIR is not None else data_home() / "workspace" / "research"
+    if RESEARCH_DIR is not None:
+        return RESEARCH_DIR
+    from kiro_crew.config.loader import workspace_dir_for
+
+    return workspace_dir_for(None) / "research"
 
 
 def db_path() -> Path:

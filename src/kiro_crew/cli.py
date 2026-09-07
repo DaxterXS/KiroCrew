@@ -582,7 +582,9 @@ def _knowledge(args) -> None:
         print("Usage: kirocrew knowledge dedup [--apply]")
         return
     apply = bool(getattr(args, "apply", False))
-    db_path = config_dir() / "workspace" / "knowledge" / "knowledge.db"
+    from kiro_crew.config.loader import workspace_dir_for
+
+    db_path = workspace_dir_for(None) / "knowledge" / "knowledge.db"
     if not db_path.exists():
         sel().log_tool_invocation(
             session_key="cli", source="cli", tool_name="knowledge_dedup", outcome="not_configured"

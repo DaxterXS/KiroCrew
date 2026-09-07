@@ -281,9 +281,14 @@ def _allowed_local_roots() -> list[Path]:
                     roots.append(cand.resolve())
             except OSError:
                 pass
-    # Always allow the agent's own config-dir workspace (e.g. ~/.kiro/crew/workspace).
+    # Always allow the agent's own default-workspace data dir (config-resolved,
+    # e.g. ~/.kiro/crew/workspace). workspace_dir_for(None) follows
+    # ``workspaces.default.dir`` so a relocated default is still permitted; the
+    # cfg.workspaces loop below also covers it, this is the belt for the default.
     try:
-        cdir_ws = config_dir() / "workspace"
+        from kiro_crew.config.loader import workspace_dir_for
+
+        cdir_ws = workspace_dir_for(None)
         if cdir_ws.exists() and cdir_ws.resolve() not in roots:
             roots.append(cdir_ws.resolve())
     except OSError:

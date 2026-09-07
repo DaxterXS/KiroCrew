@@ -544,9 +544,9 @@ def read_memory_migrated() -> Optional[int]:
 
 def _read_knowledge_documents_uncached() -> Optional[int]:
     """Uncached knowledge-source count. See :func:`read_knowledge_documents`."""
-    from kiro_crew.config.paths import config_dir
+    from kiro_crew.config.loader import workspace_dir_for
 
-    db_path = config_dir() / "workspace" / "knowledge" / "knowledge.db"
+    db_path = workspace_dir_for(None) / "knowledge" / "knowledge.db"
     if not db_path.exists():
         # Never ingested: the database is created on first write, and this probe
         # must not be what creates it.

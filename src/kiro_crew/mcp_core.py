@@ -37,12 +37,13 @@ from typing import Any
 from kiro_crew import platform_compat
 from kiro_crew.agent_discovery import list_agents
 from kiro_crew.autonudge import binding_key_for, structured_monitor_binding_key_for
-from kiro_crew.config.loader import (
+from kiro_crew.config.loader import (  # noqa: F401  re-exported for mcp_tools.knowledge
     KiroCrewConfig,
     config_dir,
     outbox_dir,
     read_local_secret,
     resolve_agent_bindings,
+    workspace_dir_for,
 )
 from kiro_crew.context_management import summarize_result
 from kiro_crew.dashboard.origin import dashboard_socket_path

@@ -39,7 +39,7 @@ resolution: which layer wins".
 
 ## Memory (`memory.py`)
 
-Structured files under `~/.kiro/crew/workspace/memory/`:
+Structured files under the default workspace's `memory/` dir — `workspace_dir_for(None)/memory/`, which is `~/.kiro/crew/workspace/memory/` at the shipped default and follows `workspaces.default.dir` in `config.json`:
 - `preferences.md` — learned user preferences (replaced wholesale by consolidator)
 - `projects.md` — active project context (replaced wholesale by consolidator)
 - `history/{date}.md` — daily conversation summaries (append-only, pruned by heartbeat)

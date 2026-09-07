@@ -32,6 +32,7 @@ from kiro_crew.config.loader import (
     _raw_config,
     config_dir,
     resolve_effective_agent,
+    workspace_dir_for,
 )
 from kiro_crew.constants import (
     OPTIONS_RE_LINE,
@@ -5974,7 +5975,7 @@ class DashboardState:
     def knowledge_store(self):  # type: ignore[override]
         """Lazy-init KnowledgeStore on first access."""
         if self._knowledge_store is None:
-            db_dir = os.path.join(str(config_dir()), "workspace", "knowledge")
+            db_dir = os.path.join(str(workspace_dir_for(None)), "knowledge")
             os.makedirs(db_dir, exist_ok=True)
             self._knowledge_store = KnowledgeStore(os.path.join(db_dir, "knowledge.db"))
         return self._knowledge_store

@@ -87,6 +87,13 @@ def _crew_data_home() -> Path:
     # config_dir is imported at module scope but CALLED here (lazily) — issue
     # #874 forbids resolving the data home at import time, not importing the
     # resolver. It honors KIROCREW_HOME on every call.
+    #
+    # This path is LITERAL (config_dir()/"workspace", not workspace_dir_for) on
+    # purpose: config.json is agent-writable, and this directory holds
+    # credentials (pat, vaults.json, settings.json) behind the literal-path fence
+    # in security/paths.py. Resolving it through config would let anything that
+    # can write config move where those credentials live. Do NOT route this
+    # through the workspace resolver (issue #7922 routed the other data dirs).
     try:
         base = config_dir()
     except Exception:

@@ -177,7 +177,7 @@ def local_knowledge_search(name: str, args: dict[str, Any]) -> str:
     limit = args.get("limit", 3)
     source_id = args.get("source_id") or None
 
-    db_path = Path(mcp_core.config_dir()) / "workspace" / "knowledge" / "knowledge.db"
+    db_path = mcp_core.workspace_dir_for(None) / "knowledge" / "knowledge.db"
     if not db_path.exists():
         mcp_core.sel().log_tool_invocation(
             session_key=mcp_core._resolve_session_key(),
@@ -352,7 +352,7 @@ def knowledge_add_document(name: str, args: dict[str, Any]) -> str:
 def knowledge_dedup(name: str, args: dict[str, Any]) -> str:
     args = validate_tool_args(args, KNOWLEDGE_DEDUP_SCHEMA)
     apply = bool(args.get("apply", False))
-    db_path = Path(mcp_core.config_dir()) / "workspace" / "knowledge" / "knowledge.db"
+    db_path = mcp_core.workspace_dir_for(None) / "knowledge" / "knowledge.db"
     if not db_path.exists():
         mcp_core.sel().log_tool_invocation(
             session_key=mcp_core._resolve_session_key(),
@@ -390,7 +390,7 @@ def knowledge_dedup(name: str, args: dict[str, Any]) -> str:
 
 def knowledge_list_sources(name: str, args: dict[str, Any]) -> str:
     validate_tool_args(args, KNOWLEDGE_LIST_SOURCES_SCHEMA)
-    db_path = Path(mcp_core.config_dir()) / "workspace" / "knowledge" / "knowledge.db"
+    db_path = mcp_core.workspace_dir_for(None) / "knowledge" / "knowledge.db"
     if not db_path.exists():
         mcp_core.sel().log_tool_invocation(
             session_key=mcp_core._resolve_session_key(),

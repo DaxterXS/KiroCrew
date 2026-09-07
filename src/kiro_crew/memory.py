@@ -100,7 +100,15 @@ def _is_corruption_error(exc: BaseException) -> bool:
 
 
 def workspace_dir() -> Path:
-    return config_dir() / WORKSPACE_DIR_NAME
+    # Resolve the default workspace's data dir from config.json, so relocating
+    # ``workspaces.default.dir`` moves memory with it. At the shipped default
+    # (``dir="workspace"``) this returns ``config_dir() / "workspace"`` -- the
+    # exact path this used to hardcode -- so the behavior is unchanged until a
+    # user opts in. ``memory.py`` already imports from ``config.loader``, so the
+    # resolver adds no new import.
+    from kiro_crew.config.loader import workspace_dir_for
+
+    return workspace_dir_for(None)
 
 
 def memory_dir() -> Path:

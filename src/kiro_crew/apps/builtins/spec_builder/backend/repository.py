@@ -74,7 +74,11 @@ _SETTINGS_PATH: Path | None = None
 
 def _state_dir() -> Path:
     """Where this app keeps its own state. Resolved per call, never cached."""
-    return _STATE_DIR if _STATE_DIR is not None else config_dir() / "workspace" / APP_NAME
+    if _STATE_DIR is not None:
+        return _STATE_DIR
+    from kiro_crew.config.loader import workspace_dir_for
+
+    return workspace_dir_for(None) / APP_NAME
 
 
 def _index_path() -> Path:
