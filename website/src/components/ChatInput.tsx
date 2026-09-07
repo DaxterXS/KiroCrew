@@ -57,6 +57,7 @@ import {
   makePasteId,
   formatToken,
   tokenRangeAt,
+  expandTokenAt,
   pruneBlocks,
   nextSeq,
   findTokenRanges,
@@ -2495,6 +2496,43 @@ function ChatInput({
           const el = inputRef.current
           if (el) el.setSelectionRange(r.start, r.start)
         })
+      }
+
+      // Cmd/Ctrl+V a SECOND time, with the caret resting on a collapsed paste
+      // token, expands that one paste inline so it can be reviewed, trimmed or
+      // edited in place. The FIRST Cmd/Ctrl+V pasted the block and collapsed it
+      // to `[ Paste #N ]`, leaving the caret on the token; pressing it again is
+      // the "show me what I pasted" gesture (issue #8513, matching Claude Code).
+      //
+      // Positional, not timed: the trigger is "caret is on a token", the same
+      // model the Backspace/Delete/Arrow branches above use. There is no
+      // double-tap timeout, so a single Cmd/Ctrl+V anywhere else keeps its
+      // instant native paste and never feels slower.
+      //
+      // Plain Cmd/Ctrl+V only. Shift+V (rawPasteRef, inline-paste next) and any
+      // selection that spans the token (a copy/cut/replace intent) fall through
+      // to native handling.
+      if (
+        (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey &&
+        e.key.toLowerCase() === 'v' && isCollapsed
+      ) {
+        const expanded = expandTokenAt(v, pasteBlocks, ss)
+        if (expanded) {
+          // preventDefault stops the clipboard from being re-pasted on top of
+          // the token; the gesture replaces the token with its own content.
+          e.preventDefault()
+          onChange(expanded.text)
+          // Drop the expanded block: it is now plain editable text and must not
+          // be re-sent as a separate paste (send maps remaining tokens via
+          // pruneBlocks). The pruneBlocks effect would drop it anyway once its
+          // token is gone; doing it here keeps the two in sync in one tick.
+          onPasteBlocksChange?.(pasteBlocks.filter(b => b.id !== expanded.block.id))
+          requestAnimationFrame(() => {
+            const el = inputRef.current
+            if (el) el.setSelectionRange(expanded.selStart, expanded.selEnd)
+          })
+          return
+        }
       }
 
       // Backspace with caret just past a token → delete whole token

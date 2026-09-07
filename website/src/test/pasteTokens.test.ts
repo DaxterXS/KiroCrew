@@ -7,6 +7,7 @@ import {
   nextSeq,
   findTokenRanges,
   tokenRangeAt,
+  expandTokenAt,
   pruneBlocks,
   expandAll,
   recollapsePastes,
@@ -112,6 +113,67 @@ describe('pasteTokens', () => {
       const b = block({ seq: 1 })
       const input = [b]
       expect(pruneBlocks(formatToken(b), input)).toBe(input)
+    })
+  })
+
+  describe('expandTokenAt', () => {
+    it('replaces the token at the caret with its content and selects it', () => {
+      const b = block({ id: 'x', seq: 1, content: 'line1\nline2\nline3' })
+      const text = `before ${formatToken(b)} after`
+      const caret = text.indexOf('[') + 4 // inside the token
+      const r = expandTokenAt(text, [b], caret)
+      expect(r).not.toBeNull()
+      expect(r!.text).toBe('before line1\nline2\nline3 after')
+      expect(r!.block.id).toBe('x')
+      // Selection wraps exactly the inserted content.
+      expect(r!.text.slice(r!.selStart, r!.selEnd)).toBe('line1\nline2\nline3')
+    })
+
+    it('expands ONLY the token at the caret, leaving the others collapsed', () => {
+      const b1 = block({ id: 'a', seq: 1, content: 'AAA' })
+      const b2 = block({ id: 'b', seq: 2, content: 'BBB' })
+      const text = `${formatToken(b1)} mid ${formatToken(b2)}`
+      const onB2 = text.indexOf(formatToken(b2)) + 3 // caret inside b2's token
+      const r = expandTokenAt(text, [b1, b2], onB2)
+      expect(r).not.toBeNull()
+      expect(r!.block.id).toBe('b')
+      expect(r!.text).toBe(`${formatToken(b1)} mid BBB`)
+    })
+
+    it('returns null when the caret is not on a token', () => {
+      const b = block({ seq: 1, content: 'ZZZ' })
+      const text = `plain ${formatToken(b)} text`
+      expect(expandTokenAt(text, [b], 0)).toBeNull()
+    })
+
+    it('resolves a token the caret is one trailing newline past (paste before existing text)', () => {
+      // Collapse-on-paste wraps the token as `token + "\n"` and parks the caret
+      // AFTER the newline, so tokenRangeAt misses. expandTokenAt must still find
+      // it or the second shortcut re-pastes the clipboard.
+      const b = block({ id: 'p', seq: 1, content: 'AAA\nBBB\nCCC' })
+      const text = `${formatToken(b)}\nrest`
+      const caretPastNewline = formatToken(b).length + 1 // just past the "\n"
+      const r = expandTokenAt(text, [b], caretPastNewline)
+      expect(r).not.toBeNull()
+      expect(r!.block.id).toBe('p')
+      expect(r!.text).toBe('AAA\nBBB\nCCC\nrest')
+    })
+
+    it('does NOT bridge more than a single newline', () => {
+      // A caret out in ordinary text, two chars past a token, is not an expand.
+      const b = block({ seq: 1, content: 'ZZZ' })
+      const text = `${formatToken(b)}\nxy`
+      const caretDeep = formatToken(b).length + 3 // past "\nxy" — well clear
+      expect(expandTokenAt(text, [b], caretDeep)).toBeNull()
+    })
+
+    it('does NOT bridge a space (a caret one space past a token is normal typing)', () => {
+      // `[ Paste #1 ] and more`, caret before "and" -> the user means to paste
+      // new clipboard content, not re-expand. Only a newline is bridged.
+      const b = block({ seq: 1, content: 'ZZZ' })
+      const text = `${formatToken(b)} and more`
+      const caretPastSpace = formatToken(b).length + 1 // just past the space
+      expect(expandTokenAt(text, [b], caretPastSpace)).toBeNull()
     })
   })
 

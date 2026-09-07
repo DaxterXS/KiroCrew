@@ -133,6 +133,58 @@ export function tokenRangeAt(
   return null
 }
 
+/**
+ * Expand the single collapsed-paste token the caret is on (or immediately
+ * after), in place.
+ *
+ * Returns the rewritten text with that one token replaced by its block's
+ * verbatim content, the block whose token was expanded (so the caller can drop
+ * it from the tracked set — an expanded paste is plain editable text and must
+ * not also be re-sent as a separate paste), and the caret offsets that keep the
+ * selection wrapped around the freshly-inserted content. Returns `null` when
+ * the caret is not on a token, so the caller can fall through to native paste.
+ *
+ * Caret resolution has two cases, because collapsing a paste wraps the token in
+ * newlines and parks the caret AFTER the trailing one:
+ *   1. Caret inside/on the token (`tokenRangeAt`) — the end-of-line paste case,
+ *      where there is no trailing newline and the caret rests on the token.
+ *   2. Caret one newline past a token's end — the paste-before-existing-text
+ *      case: the insert is `token + "\n"` and the caret lands after the "\n",
+ *      so `tokenRangeAt` would miss and the second shortcut would re-paste the
+ *      clipboard. We resolve the token whose end is the single `\n` immediately
+ *      before the caret, mirroring the Backspace "caret just past a token"
+ *      branch in ChatInput. A space is NOT bridged: a caret one space past a
+ *      token is a normal mid-typing position where the user means to paste new
+ *      content, not re-expand.
+ *
+ * This is the composer counterpart to {@link expandAll}: `expandAll` inlines
+ * every token for send/optimize, while this inlines exactly the one the user
+ * asked to review, leaving any other tokens collapsed.
+ */
+export function expandTokenAt(
+  text: string,
+  blocks: PasteBlock[],
+  caret: number,
+): { text: string; block: PasteBlock; selStart: number; selEnd: number } | null {
+  let r = tokenRangeAt(text, blocks, caret)
+  if (!r && caret > 0 && text[caret - 1] === '\n') {
+    // Case 2: caret sits just past a token's trailing NEWLINE. Collapse-on-paste
+    // wraps the token as `token + "\n"` and parks the caret after the newline
+    // (the paste-before-existing-text case), so tokenRangeAt misses and a second
+    // shortcut would re-paste the clipboard. Only a newline is bridged, and only
+    // one: a caret one SPACE past a token's `]` is a normal typing position
+    // (`[ Paste #1 ] and more`, caret before "and"), where the user means to
+    // paste new clipboard content, not re-expand the paste -- so a space is left
+    // to native paste. A caret two or more chars past a token never matches.
+    r = findTokenRanges(text, blocks).find(x => x.end === caret - 1) ?? null
+  }
+  if (!r) return null
+  const out = text.slice(0, r.start) + r.block.content + text.slice(r.end)
+  // Select the inserted content so the user can immediately trim or replace it,
+  // and so a screen reader announces the newly-selected region.
+  return { text: out, block: r.block, selStart: r.start, selEnd: r.start + r.block.content.length }
+}
+
 export function pruneBlocks(text: string, blocks: PasteBlock[]): PasteBlock[] {
   if (!blocks.length) return blocks
   const survivors = new Set(findTokenRanges(text, blocks).map(r => r.block.id))

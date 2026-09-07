@@ -417,3 +417,93 @@ describe('ChatInput paste: strip trailing blank lines', () => {
     expect(onChange).toHaveBeenCalledWith('just one line')
   })
 })
+
+describe('ChatInput: Cmd/Ctrl+V on a collapsed paste token expands it inline (#8513)', () => {
+  const TOKEN = '[ Paste #1 · 3 lines ]'
+  const CONTENT = 'line1\nline2\nline3'
+
+  // Controlled host so onChange writes flow back into `value`, and the caret
+  // can be parked inside the token before the gesture fires.
+  const renderHost = (onPasteBlocksChange = vi.fn()) => {
+    const seen = { blocks: [{ id: 'p1', seq: 1, lines: 3, content: CONTENT }] as { id: string; seq: number; lines: number; content: string }[] }
+    const Host = () => {
+      const [v, setV] = useState(`before ${TOKEN} after`)
+      return (
+        <ChatInput
+          value={v}
+          onChange={setV}
+          onSend={vi.fn()}
+          pasteBlocks={seen.blocks}
+          onPasteBlocksChange={onPasteBlocksChange}
+        />
+      )
+    }
+    renderWithProviders(<Host />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    return ta
+  }
+
+  const caretInsideToken = (ta: HTMLTextAreaElement) => {
+    const at = ta.value.indexOf('[') + 4
+    ta.focus()
+    ta.setSelectionRange(at, at)
+    return at
+  }
+
+  it('replaces the token with its full content when Cmd+V is pressed on it', () => {
+    const ta = renderHost()
+    caretInsideToken(ta)
+    fireEvent.keyDown(ta, { key: 'v', metaKey: true })
+    expect(ta.value).toBe(`before ${CONTENT} after`)
+  })
+
+  it('drops the expanded block so it is not also re-sent as a paste', () => {
+    const onPasteBlocksChange = vi.fn()
+    const ta = renderHost(onPasteBlocksChange)
+    caretInsideToken(ta)
+    fireEvent.keyDown(ta, { key: 'v', ctrlKey: true })
+    expect(onPasteBlocksChange).toHaveBeenCalledWith([])
+  })
+
+  it('leaves the token collapsed when the caret is NOT on it', () => {
+    const ta = renderHost()
+    ta.focus()
+    ta.setSelectionRange(0, 0) // caret at the very start, before the token
+    fireEvent.keyDown(ta, { key: 'v', metaKey: true })
+    // Token untouched — the gesture fell through to native paste handling.
+    expect(ta.value).toContain(TOKEN)
+  })
+
+  it('does not fire for Cmd+Shift+V (raw-inline-paste), leaving the token collapsed', () => {
+    const ta = renderHost()
+    caretInsideToken(ta)
+    fireEvent.keyDown(ta, { key: 'v', metaKey: true, shiftKey: true })
+    expect(ta.value).toContain(TOKEN)
+  })
+
+  it('expands when the caret is one trailing newline past the token (paste before existing text)', () => {
+    // Collapse-on-paste at the start of the box inserts `token + "\n"` and parks
+    // the caret AFTER the newline, so a plain caret-on-token test would miss and
+    // the second Cmd/Ctrl+V would re-paste the clipboard instead of expanding.
+    const seen = { blocks: [{ id: 'p1', seq: 1, lines: 3, content: CONTENT }] }
+    const Host = () => {
+      const [v, setV] = useState(`${TOKEN}\nrest of the message`)
+      return (
+        <ChatInput
+          value={v}
+          onChange={setV}
+          onSend={vi.fn()}
+          pasteBlocks={seen.blocks}
+          onPasteBlocksChange={vi.fn()}
+        />
+      )
+    }
+    renderWithProviders(<Host />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    ta.focus()
+    const pastNewline = TOKEN.length + 1 // just past the "\n" the collapse added
+    ta.setSelectionRange(pastNewline, pastNewline)
+    fireEvent.keyDown(ta, { key: 'v', metaKey: true })
+    expect(ta.value).toBe(`${CONTENT}\nrest of the message`)
+  })
+})
