@@ -473,4 +473,69 @@ describe('ProjectPicker', () => {
       expect(browseSpy).not.toHaveBeenCalled()
     })
   })
+
+  describe('native folder picker', () => {
+    const pickerBtn = () => screen.findByRole('button', { name: /Choose folder/ })
+
+    it('shows the native picker button on the Browse tab when available', async () => {
+      vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: true })
+      vi.spyOn(api, 'pickProjectFolder').mockResolvedValue({ path: null })
+      renderWithProviders(
+        <ProjectPicker open={true} onOpenChange={vi.fn()} anchorRect={rect(100, 50)} onSelect={vi.fn()} />
+      )
+      fireEvent.mouseDown(await screen.findByText('Browse'))
+      // Labeled with visible text (not icon-only) so a first-time user can read it.
+      expect(await pickerBtn()).toBeInTheDocument()
+    })
+
+    it('hides the native picker button when unavailable (remote/plain browser)', async () => {
+      vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: false })
+      renderWithProviders(
+        <ProjectPicker open={true} onOpenChange={vi.fn()} anchorRect={rect(100, 50)} onSelect={vi.fn()} />
+      )
+      fireEvent.mouseDown(await screen.findByText('Browse'))
+      await act(async () => { await Promise.resolve() })
+      expect(screen.queryByRole('button', { name: /Choose folder/ })).not.toBeInTheDocument()
+    })
+
+    it('commits a chosen path through onSelect (the same downstream path a typed value takes)', async () => {
+      vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: true })
+      vi.spyOn(api, 'pickProjectFolder').mockResolvedValue({ path: '/home/u/picked' })
+      const onSelect = vi.fn()
+      const onOpenChange = vi.fn()
+      renderWithProviders(
+        <ProjectPicker open={true} onOpenChange={onOpenChange} anchorRect={rect(100, 50)} onSelect={onSelect} />
+      )
+      fireEvent.mouseDown(await screen.findByText('Browse'))
+      fireEvent.mouseDown(await pickerBtn())
+      await waitFor(() => expect(onSelect).toHaveBeenCalledWith('/home/u/picked'))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+
+    it('leaves the picker open and unchanged when the dialog is cancelled', async () => {
+      vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: true })
+      vi.spyOn(api, 'pickProjectFolder').mockResolvedValue({ path: null })
+      const onSelect = vi.fn()
+      renderWithProviders(
+        <ProjectPicker open={true} onOpenChange={vi.fn()} anchorRect={rect(100, 50)} onSelect={onSelect} />
+      )
+      fireEvent.mouseDown(await screen.findByText('Browse'))
+      fireEvent.mouseDown(await pickerBtn())
+      await act(async () => { await Promise.resolve() })
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it('surfaces an error when the dialog request fails instead of swallowing it', async () => {
+      vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: true })
+      vi.spyOn(api, 'pickProjectFolder').mockRejectedValue(new Error('pick-folder 403'))
+      const onSelect = vi.fn()
+      renderWithProviders(
+        <ProjectPicker open={true} onOpenChange={vi.fn()} anchorRect={rect(100, 50)} onSelect={onSelect} />
+      )
+      fireEvent.mouseDown(await screen.findByText('Browse'))
+      fireEvent.mouseDown(await pickerBtn())
+      expect(await screen.findByText(/Could not open the folder dialog/)).toBeInTheDocument()
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+  })
 })

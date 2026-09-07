@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { FolderOpen, ChevronRight, ChevronLeft, Clock, Search } from 'lucide-react'
 import { api } from '../api/client'
 import { useListKeyboardNav } from '../hooks/useListKeyboardNav'
+import ErrorNotice from './ErrorNotice'
 
 import { i18nT } from '../i18n/t'
 interface Props {
@@ -24,6 +25,9 @@ export default function ProjectPicker({ open, onOpenChange, anchorRef, anchorRec
   const [recentDirs, setRecentDirs] = useState<string[]>([])
   const [recentQuery, setRecentQuery] = useState('')
   const [browseSel, setBrowseSel] = useState(0)
+  const [nativePickerAvailable, setNativePickerAvailable] = useState(false)
+  const [nativePicking, setNativePicking] = useState(false)
+  const [nativePickError, setNativePickError] = useState<string | null>(null)
   const btnRef = anchorRef
   const dropRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -68,6 +72,14 @@ export default function ProjectPicker({ open, onOpenChange, anchorRef, anchorRec
       setRecentDirs(d.dirs || [])
       setTab(d.dirs?.length ? 'recent' : 'browse')
     }).catch(() => setTab('browse'))
+    // Ask the gateway whether it can open a native folder dialog here. It can
+    // only when the dashboard is local and the host is a platform we drive a
+    // chooser on (macOS/Windows); on a remote gateway or a plain browser this
+    // stays false and the button is never shown, leaving the typed-path Browse
+    // route as the way to select a project. Optional-chained so a caller/test
+    // that stubs a partial api client simply leaves the picker unavailable
+    // rather than throwing out of this effect.
+    api.projectPickerConfig?.().then(c => setNativePickerAvailable(!!c.folder_picker)).catch(() => setNativePickerAvailable(false))
     browse()
   }, [open, browse])
 
@@ -103,6 +115,28 @@ export default function ProjectPicker({ open, onOpenChange, anchorRef, anchorRec
       ? (/^[A-Za-z]:[\\/]$/.test(path) ? path : path.replace(/[\\/]+$/, ''))
       : (path.replace(/\/+$/, '') || '/')
     onSelect(clean); onOpenChange(false)
+  }
+
+  // Open the host's native folder dialog and, on a real selection, commit it
+  // through the SAME `select()` path a typed or browsed path uses -- so the
+  // chosen directory is re-validated downstream (browse/project-select) exactly
+  // like any other and the dialog is a shortcut into the existing flow, never a
+  // bypass of it. A cancel (null path) leaves the picker open and unchanged.
+  // Defined inline (not memoized) so it always closes over the CURRENT
+  // `select`/`onSelect`: a memoized empty-deps callback would keep committing to
+  // the slot that was current at mount if the picker outlives a slot switch.
+  // A failure is surfaced in the popover rather than swallowed: POST
+  // /api/pick-folder can reject on a transport error or a 403 if availability
+  // flipped since the config probe, and a silent `.catch(() => {})` would leave
+  // the button re-enabled with no explanation (the dead-end shape the
+  // errors-use-error-notice rule bans).
+  const openNativePicker = () => {
+    setNativePicking(true)
+    setNativePickError(null)
+    api.pickProjectFolder()
+      .then(res => { if (res.path) select(res.path) })
+      .catch(() => setNativePickError(i18nT('components.projectPicker.native_folder_dialog_failed')))
+      .finally(() => setNativePicking(false))
   }
   const rq = recentQuery.trim().toLowerCase()
   const filteredRecent = rq ? recentDirs.filter(d => d.toLowerCase().includes(rq)) : recentDirs
@@ -316,7 +350,23 @@ export default function ProjectPicker({ open, onOpenChange, anchorRef, anchorRec
               className="flex-1 bg-bg-elevated border border-border rounded px-2 py-1.5 text-[13px] font-mono text-text placeholder:text-muted focus:outline-none focus-visible:border-accent"
             />
             <button disabled={!input.trim() && !browsePath} onMouseDown={e => { e.preventDefault(); select(input.trim() || browsePath) }} className="px-2 py-1 text-[11px] bg-accent/20 text-accent rounded hover:bg-accent/30 disabled:opacity-40 disabled:cursor-not-allowed shrink-0">{i18nT('components.projectPicker.select')}</button>
+            {nativePickerAvailable && (
+              <button
+                type="button"
+                disabled={nativePicking}
+                title={i18nT('components.projectPicker.open_native_folder_dialog')}
+                onMouseDown={e => { e.preventDefault(); openNativePicker() }}
+                className="px-2 py-1 text-[11px] flex items-center gap-1 bg-bg-elevated border border-border text-text rounded hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                <FolderOpen size={12} /> {i18nT('components.projectPicker.choose_folder')}
+              </button>
+            )}
           </div>
+          {nativePickError && (
+            <div className="px-2 pb-1">
+              <ErrorNotice variant="inline" message={nativePickError} onDismiss={() => setNativePickError(null)} />
+            </div>
+          )}
           <div id="pp-browse-list" role="listbox" aria-label={i18nT('components.projectPicker.subdirectories')} className="overflow-y-auto flex-1 min-h-0">
             {filteredBrowse.length === 0 && <div className="px-3 py-4 text-[12px] text-muted text-center">{i18nT('components.projectPicker.no_subdirectories')}</div>}
             {filteredBrowse.map((d, i) => (

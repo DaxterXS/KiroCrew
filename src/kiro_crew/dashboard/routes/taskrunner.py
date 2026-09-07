@@ -47,6 +47,8 @@ def register(app: web.Application) -> None:
     app.router.add_get("/api/file-sheet", handlers.api_file_sheet)
     app.router.add_get("/api/browse-dirs", handlers.api_browse_dirs)
     app.router.add_get("/api/browse-files", handlers.api_browse_files)
+    app.router.add_post("/api/pick-folder", handlers.api_pick_project_folder)
+    app.router.add_get("/api/project-picker/config", handlers.api_project_picker_config)
     app.router.add_get("/api/project/git", handlers.api_project_git)
     app.router.add_get("/api/project/git/status", handlers.api_project_git_status)
     app.router.add_get("/api/project/git/log", handlers.api_project_git_log)

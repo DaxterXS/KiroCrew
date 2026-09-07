@@ -12,6 +12,8 @@ vi.mock('../api/client', () => ({
   api: {
     browseDirs: (path?: string) => browseDirs(path),
     recentProjects: () => recentProjects(),
+    projectPickerConfig: () => Promise.resolve({ folder_picker: false }),
+    pickProjectFolder: () => Promise.resolve({ path: null }),
   },
 }))
 

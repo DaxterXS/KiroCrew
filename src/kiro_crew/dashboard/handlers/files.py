@@ -13,6 +13,7 @@ import mimetypes
 import ntpath
 import os
 import re
+import shutil
 import stat as _stat_mod
 import subprocess
 import sys
@@ -3532,6 +3533,145 @@ async def api_browse_dirs(request: web.Request) -> web.Response:
     dirs = await asyncio.to_thread(_browse_dirs_sync, base, skip)
     _sel().log_api_access(caller=caller, operation="browse_dirs", outcome="allowed", resources=base)
     return web.json_response({"path": base, "parent": os.path.dirname(base), "dirs": dirs})
+
+
+# Max wall-clock the native folder dialog may stay open before we give up. The
+# user may be browsing their filesystem, so this is generous.
+_PROJECT_FOLDER_DIALOG_TIMEOUT = 300  # seconds
+
+# Fixed AppleScript program text. No caller-controlled value is interpolated, so
+# the argv below stays a literal and cannot be shell/AppleScript-injected.
+_PROJECT_OSASCRIPT_PROGRAM = (
+    'POSIX path of (choose folder with prompt "Select a project folder")'
+)
+
+# Fixed PowerShell program text for the Windows native folder chooser. Same
+# rule: no caller value is interpolated, so the body is a fixed literal. STA is
+# required for the WinForms dialog; the chosen path is written to stdout, or
+# nothing is written on cancel.
+_PROJECT_POWERSHELL_PROGRAM = (
+    "Add-Type -AssemblyName System.Windows.Forms; "
+    "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+    "$d.Description = 'Select a project folder'; "
+    "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+    "{ [Console]::Out.Write($d.SelectedPath) }"
+)
+
+
+def _windows_powershell() -> str | None:
+    """Absolute path to powershell.exe, or None when it is not usable. Prefer the
+    System32 copy (present on every Windows install) over PATH so a shimmed
+    ``powershell`` earlier on PATH cannot shadow it."""
+    if sys.platform != "win32":
+        return None
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    fixed = os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    if os.path.isfile(fixed):
+        return fixed
+    return shutil.which("powershell")
+
+
+def _project_folder_picker_available(request: web.Request) -> bool:
+    """The native project-folder picker opens a dialog ON THE GATEWAY HOST, so it
+    is offered only when the dashboard is local (browser and gateway co-located)
+    and only on a platform we can drive a native chooser on: macOS via osascript,
+    Windows via PowerShell's FolderBrowserDialog. On a remote gateway the dialog
+    would open on the wrong screen, and in a plain browser there is no host shell
+    to open it at all -- in both cases the picker is honestly absent and the
+    existing typed-path Browse tab stays the way to select a project."""
+    if not bool(request.app.get("local_only", False)):
+        return False
+    # `local_only` is necessary but not sufficient: a reverse proxy / tunnel
+    # delivers a REMOTE user's request from a loopback peer while local_only
+    # stays True, and a host-side native dialog must never open for such a
+    # request (it would appear on the gateway's screen, not the user's). Require
+    # a DIRECT local request too -- loopback peer with no forwarding headers --
+    # so a proxied request fails the gate and falls back to the typed-path route.
+    if not is_direct_local_request(request):
+        return False
+    if sys.platform == "darwin":
+        return shutil.which("osascript") is not None
+    if sys.platform == "win32":
+        return _windows_powershell() is not None
+    return False
+
+
+def _project_folder_dialog_argv() -> list[str] | None:
+    """The fixed argv for the host's native folder chooser, or None on a platform
+    we cannot drive one on (or when Windows PowerShell is missing). Split out from
+    _run_project_folder_dialog so the platform branches resolve to a single
+    ``list[str] | None`` that mypy narrows cleanly regardless of the platform it
+    type-checks on."""
+    if sys.platform == "darwin":
+        return ["osascript", "-e", _PROJECT_OSASCRIPT_PROGRAM]
+    if sys.platform == "win32":
+        exe = _windows_powershell()
+        if exe is None:
+            return None
+        return [exe, "-NoProfile", "-NonInteractive", "-STA", "-Command", _PROJECT_POWERSHELL_PROGRAM]
+    return None
+
+
+def _run_project_folder_dialog() -> str | None:
+    """Open the host's native folder chooser (blocking) and return the selected
+    absolute path, or None if the user cancelled or the dialog failed to launch.
+    Meant to run off the event loop via an executor. The argv is a fixed literal
+    on both platforms -- no caller value is interpolated -- so there is no shell
+    and nothing injectable."""
+    cmd = _project_folder_dialog_argv()
+    if cmd is None:
+        return None
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            cmd, capture_output=True, text=True, encoding="utf-8",
+            timeout=_PROJECT_FOLDER_DIALOG_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    # osascript exits non-zero and prints nothing when the user cancels;
+    # PowerShell exits 0 but writes nothing. Either way an empty stdout means no
+    # selection, which the `path` truthiness check below turns into None.
+    path = proc.stdout.strip()
+    return path if proc.returncode == 0 and path else None
+
+
+async def api_pick_project_folder(request: web.Request) -> web.Response:
+    """POST /api/pick-folder -- open the host's native folder chooser and return
+    the selected absolute path.
+
+    Offered only on a local macOS/Windows dashboard (see
+    _project_folder_picker_available). The returned path is NOT trusted: the
+    dashboard feeds it back into the same project-path field a user could type
+    into, and it is re-validated by the existing browse-dirs / project-select flow
+    (is_sensitive_path, isdir) exactly like any typed path. This handler adds no
+    new allowed paths; it is only a faster way to fill that field."""
+    caller = request.get("user", "dashboard")
+    if not _project_folder_picker_available(request):
+        _sel().log_api_access(
+            caller=caller, operation="pick_project_folder", outcome="denied",
+            error="picker unavailable",
+        )
+        return web.json_response(
+            {
+                "error": "Folder picker is not available on this system",
+                "code": "folder_picker_unavailable",
+            },
+            status=403,
+        )
+    loop = asyncio.get_running_loop()
+    path = await loop.run_in_executor(None, _run_project_folder_dialog)
+    _sel().log_api_access(
+        caller=caller, operation="pick_project_folder",
+        outcome="allowed" if path else "cancelled",
+    )
+    return web.json_response({"path": path})
+
+
+async def api_project_picker_config(request: web.Request) -> web.Response:
+    """GET /api/project-picker/config -- tell the dashboard whether the native
+    folder picker can be offered here, so the button appears only where it works
+    and the typed-path route stays the way to select a project everywhere else."""
+    return web.json_response({"folder_picker": _project_folder_picker_available(request)})
 
 
 #: Depth ceiling for the walk-up that looks for a repository root. A project

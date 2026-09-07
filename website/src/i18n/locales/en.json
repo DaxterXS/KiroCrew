@@ -4757,9 +4757,12 @@
     "projectPicker": {
       "back": "Back",
       "browse": "Browse",
+      "choose_folder": "Choose folder…",
+      "native_folder_dialog_failed": "Could not open the folder dialog. Please try again or type the path.",
       "no_matching_projects": "No matching projects",
       "no_recent_projects": "No recent projects",
       "no_subdirectories": "No subdirectories",
+      "open_native_folder_dialog": "Open native folder dialog",
       "path_to_project": "/path/to/project",
       "project_directory_path": "Project directory path",
       "recent": "Recent",

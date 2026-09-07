@@ -129,6 +129,9 @@ beforeEach(() => {
   vi.spyOn(api, 'browseDirs').mockResolvedValue({
     path: '/work', parent: '/', dirs: [{ name: 'monorepo', path: ROOT }],
   })
+  // The picker also probes native-folder-dialog availability on open; spy it too
+  // so that request never reaches the ordered fetch queue above.
+  vi.spyOn(api, 'projectPickerConfig').mockResolvedValue({ folder_picker: false })
 })
 
 afterEach(() => {
