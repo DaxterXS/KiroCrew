@@ -11,6 +11,7 @@ exercised on each call rather than bypassed. The folder picker is disabled via
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import importlib
@@ -2440,6 +2441,173 @@ def test_pat_header_is_scoped_to_github_only() -> None:
     assert leaked == [], leaked
 
 
+def _auth_header(env: dict) -> tuple[str, str]:
+    """The one scoped ``(config-key, header-value)`` a PAT env carries.
+
+    Reads the numbered GIT_CONFIG sequence the way git does, and returns the
+    single ``http.<origin>.extraHeader`` entry. Fails if there is not exactly
+    one, which is itself the leak check: a second (or a bare) header would break
+    the single-scope invariant.
+    """
+    headers = [
+        (env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"])
+        for i in range(int(env["GIT_CONFIG_COUNT"]))
+        if env[f"GIT_CONFIG_KEY_{i}"].startswith("http.")
+        and env[f"GIT_CONFIG_KEY_{i}"].endswith(".extraHeader")
+    ]
+    assert len(headers) == 1, headers
+    return headers[0]
+
+
+def _decode_basic(header_value: str) -> str:
+    """The decoded ``user:pass`` from an ``Authorization: Basic <b64>`` header."""
+    assert header_value.startswith("Authorization: Basic ")
+    b64 = header_value[len("Authorization: Basic ") :]
+    return base64.b64decode(b64).decode()
+
+
+def test_pat_header_github_via_explicit_url_matches_the_default() -> None:
+    """Positive GitHub control taken the SAME WAY as the GitLab tests below.
+
+    Passing an explicit github.com remote must produce byte-for-byte the header
+    the no-URL default sends: same scope key, same `<token>:x-oauth-basic`
+    credential. This pins that adding the GitLab branch did not perturb the
+    GitHub path, and does so through the exact `remote_url` argument the new
+    GitLab cases exercise -- so a green suite proves both providers, not just
+    that a new branch exists.
+    """
+    default_env = git_ops._auth_env("secret-token")
+    url_env = git_ops._auth_env("secret-token", "https://github.com/owner/repo.git")
+    assert _auth_header(default_env) == _auth_header(url_env)
+    key, value = _auth_header(url_env)
+    assert key == "http.https://github.com/.extraHeader"
+    assert _decode_basic(value) == "secret-token:x-oauth-basic"
+
+
+def test_pat_header_scopes_to_gitlab_com() -> None:
+    """A gitlab.com remote scopes the header to gitlab.com with GitLab's pair.
+
+    GitLab authenticates a PAT over HTTPS as the basic-auth PASSWORD with a
+    fixed username git does not evaluate (`oauth2:<token>`) -- the mirror of
+    GitHub's `<token>:x-oauth-basic`. The scope key must name gitlab.com, never
+    github.com and never a bare `http.extraHeader`.
+    """
+    env = git_ops._auth_env("gl-token", "https://gitlab.com/group/project.git")
+    key, value = _auth_header(env)
+    assert key == "http.https://gitlab.com/.extraHeader"
+    assert _decode_basic(value) == "oauth2:gl-token"
+    # The raw token never appears in any env value -- it lives only inside the
+    # base64 of the header, which decodes to the pair asserted above.
+    assert [v for k, v in env.items() if "gl-token" in v] == []
+
+
+def test_pat_header_scopes_to_self_hosted_gitlab() -> None:
+    """A self-hosted GitLab host scopes to THAT host, not gitlab.com.
+
+    This is the reporter's case (`https://gitlab.xxx/...`). Because the header
+    is scoped by URL PREFIX, a self-hosted instance is covered exactly as the
+    hosted one is -- the scope is built from the host in the remote URL. The
+    credential convention is GitLab's, the same as gitlab.com.
+    """
+    env = git_ops._auth_env("gl-token", "https://gitlab.example.com/team/notes.git")
+    key, value = _auth_header(env)
+    assert key == "http.https://gitlab.example.com/.extraHeader"
+    assert _decode_basic(value) == "oauth2:gl-token"
+
+
+def test_pat_header_absent_for_non_http_remote() -> None:
+    """A `file://`/`ssh://`/bare-path remote authenticates by other means.
+
+    No `http.extraHeader` is emitted -- there is no https origin to scope a
+    bearer token to, and emitting an unscoped one is exactly the leak the scope
+    rule forbids.
+    """
+    for url in ("file:///tmp/vault", "ssh://git@host/repo.git", "/local/vault"):
+        env = git_ops._auth_env("secret-token", url)
+        header_keys = [
+            env[f"GIT_CONFIG_KEY_{i}"]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))
+            if env[f"GIT_CONFIG_KEY_{i}"].startswith("http.")
+        ]
+        assert header_keys == [], (url, header_keys)
+        # And the token never appears anywhere in the env for these remotes.
+        assert [k for k, v in env.items() if "secret-token" in v] == []
+
+
+@pytest.mark.asyncio
+async def test_gh_fallback_is_withheld_from_a_gitlab_remote(fixtures, monkeypatch) -> None:
+    """A `gh auth token` is a GitHub OAuth credential and must not reach GitLab.
+
+    With NO stored PAT, `resolve_auth` for a GitLab remote must return None
+    rather than the gh-minted token -- otherwise that GitHub credential would be
+    packed as this host's basic-auth and disclosed to the GitLab server. Paired
+    below with a positive control proving github.com still gets it, so a green
+    pair proves the gate discriminates by host rather than that it always
+    withholds.
+    """
+    server_mod, _remote, _seed = fixtures
+
+    async def _no_stored() -> Optional[str]:
+        return None
+
+    async def _gh() -> Optional[str]:
+        return "gho_github_oauth_token"
+
+    monkeypatch.setattr(server_mod, "read_pat", _no_stored)
+    monkeypatch.setattr(server_mod, "gh_token", _gh)
+
+    # Negative: a GitLab remote (hosted or self-hosted) gets no gh credential.
+    assert await server_mod.resolve_auth("https://gitlab.com/g/p.git") is None
+    assert await server_mod.resolve_auth("https://gitlab.example.com/t/n.git") is None
+
+
+@pytest.mark.asyncio
+async def test_gh_fallback_is_used_for_a_github_remote(fixtures, monkeypatch) -> None:
+    """Positive control for the gate: github.com still mints from gh.
+
+    Taken the SAME WAY as the GitLab case above (no stored PAT, same stubbed
+    `gh_token`), so the two together prove the fallback is confined to
+    github.com, not disabled outright.
+    """
+    server_mod, _remote, _seed = fixtures
+
+    async def _no_stored() -> Optional[str]:
+        return None
+
+    async def _gh() -> Optional[str]:
+        return "gho_github_oauth_token"
+
+    monkeypatch.setattr(server_mod, "read_pat", _no_stored)
+    monkeypatch.setattr(server_mod, "gh_token", _gh)
+
+    assert await server_mod.resolve_auth("https://github.com/o/r.git") == "gho_github_oauth_token"
+    # The historical no-URL default keeps the github.com behaviour too.
+    assert await server_mod.resolve_auth() == "gho_github_oauth_token"
+
+
+@pytest.mark.asyncio
+async def test_stored_pat_is_used_for_any_remote(fixtures, monkeypatch) -> None:
+    """An explicitly stored token is the user's own choice and is used anywhere.
+
+    The gate only governs the gh FALLBACK. A stored PAT wins for a GitLab remote
+    (that is what fixes #8025) and for github.com, and the gh fallback is never
+    consulted when one exists.
+    """
+    server_mod, _remote, _seed = fixtures
+
+    async def _stored() -> Optional[str]:
+        return "glpat_stored_token"
+
+    async def _gh_must_not_run() -> Optional[str]:
+        raise AssertionError("gh_token must not be consulted when a PAT is stored")
+
+    monkeypatch.setattr(server_mod, "read_pat", _stored)
+    monkeypatch.setattr(server_mod, "gh_token", _gh_must_not_run)
+
+    assert await server_mod.resolve_auth("https://gitlab.com/g/p.git") == "glpat_stored_token"
+    assert await server_mod.resolve_auth("https://github.com/o/r.git") == "glpat_stored_token"
+
+
 def test_execution_bearing_config_is_neutralized() -> None:
     """Repo config that names a program to run is overridden on every call."""
     env = git_ops._auth_env(None)
@@ -3455,7 +3623,7 @@ async def _noop_rebuild(vault: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-async def _no_auth() -> Optional[str]:
+async def _no_auth(remote_url: Optional[str] = None) -> Optional[str]:
     """Stand in for ``resolve_auth`` so no test mints a token from the real gh."""
     return None
 

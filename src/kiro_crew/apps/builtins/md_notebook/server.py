@@ -639,9 +639,28 @@ async def gh_token() -> Optional[str]:
     return await asyncio.to_thread(_gh_token_sync)
 
 
-async def resolve_auth() -> Optional[str]:
-    """Auth for git operations: an explicit stored PAT wins, else gh CLI."""
-    return await read_pat() or await gh_token()
+async def resolve_auth(remote_url: Optional[str] = None) -> Optional[str]:
+    """Auth for git operations against *remote_url*.
+
+    An explicitly stored PAT is used for any remote. The `gh auth token`
+    fallback is a GitHub OAuth credential, so it is confined to github.com: for
+    a GitLab (or any non-github) remote it is NOT used, because packing a GitHub
+    token as this host's basic-auth and sending it there would disclose the
+    user's GitHub credential to a third party. `remote_url` defaults to None,
+    which keeps the historical github.com behaviour for a caller that does not
+    yet know its target (there is none left in-tree; the default is a safe
+    fallback, not a live path).
+
+    Returns None when no usable credential exists for the target -- e.g. a
+    GitLab remote with no stored token. The caller then attempts the git
+    operation with no header, and git surfaces the missing-credential failure.
+    """
+    stored = await read_pat()
+    if stored:
+        return stored
+    if remote_url is None or git_ops.is_github_remote(remote_url):
+        return await gh_token()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1204,7 +1223,7 @@ async def api_vault_clone(request: web.Request) -> web.Response:
     # bad token) overwrite a previously-valid stored PAT and break every existing
     # vault's auth.
     submitted_pat = str(body["pat"]) if body.get("pat") else None
-    pat = submitted_pat or await resolve_auth()
+    pat = submitted_pat or await resolve_auth(str(body["url"]))
     # uuid, not a millisecond timestamp: two clones in the same millisecond
     # would otherwise collide on the same id and clone directory.
     vault_id = f"v{uuid.uuid4().hex}"
@@ -2031,7 +2050,7 @@ async def api_sync(request: web.Request) -> web.Response:
     result = await git_ops.sync(
         vault["localPath"],
         branch=vault.get("branch"),
-        pat=await resolve_auth(),
+        pat=await resolve_auth(vault.get("remoteUrl")),
         # Scoped vaults must only commit their own subtree — the rest of the
         # repository is the user's unrelated work.
         subfolder=vault.get("subfolder"),

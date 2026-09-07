@@ -17,6 +17,7 @@ persist it in ``.git/config`` and leak it into any error message that echoes
 the remote) and never passed as a command-line argument (which would expose it
 in the process table).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -222,6 +223,76 @@ def is_local_remote(url: str) -> bool:
 GITHUB_ORIGIN = "https://github.com/"
 
 
+def remote_host(url: Optional[str]) -> Optional[str]:
+    """Lower-cased host of an http(s) remote, or None for any other remote.
+
+    Only http(s) remotes carry a host a bearer token would be sent to; a
+    `file://`, `ssh://` or bare-path remote authenticates by other means, so
+    this returns None for them (and for an absent URL). Userinfo (`user@host`)
+    is refused upstream by `validate_remote_url`, but any that reached here is
+    stripped so the returned host is bare.
+    """
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return None
+    rest = url.split("://", 1)[1]
+    host = rest.split("/", 1)[0].rsplit("@", 1)[-1]
+    return host.lower() or None
+
+
+def is_github_remote(url: Optional[str]) -> bool:
+    """True only when *url* is an http(s) remote hosted on github.com.
+
+    This gates WHICH credential a caller may use: a `gh auth token` is a GitHub
+    OAuth credential, so it may only ever be sent to github.com. A GitLab (or
+    any non-github) remote must use an explicitly stored token instead -- see
+    `server.resolve_auth`. Enterprise github hosts on other domains are NOT
+    covered on purpose: only the literal github.com host mints from `gh`.
+    """
+    return remote_host(url) == "github.com"
+
+
+def _origin_header(pat: str, remote_url: Optional[str]) -> Optional[tuple[str, str]]:
+    """Host-scoped ``(config-key, Authorization-header)`` for *pat*, or None.
+
+    The token is a bearer credential, so the header MUST be scoped to a single
+    origin: a bare ``http.extraHeader`` applies to every https remote and would
+    hand the token to any host a later fetch touched. `git config` matches
+    ``http.<url>.*`` by URL prefix, so the returned key is ``http://<scheme>://
+    <host>/.extraHeader`` with the trailing slash keeping it to that one host.
+
+    Provider is inferred from the remote's host, not configured separately,
+    because the token store holds one opaque string and the host is the only
+    signal available at the point the header is built:
+
+    * github.com -> the token is the basic-auth USERNAME with a fixed password
+      (`<token>:x-oauth-basic`). This is GitHub's documented convention and is
+      byte-for-byte what this module has always sent; keeping it unchanged is
+      what proves the GitHub path still works.
+    * any other https host -> GitLab's convention, the token as the basic-auth
+      PASSWORD with a fixed username (`oauth2:<token>`). GitLab does not evaluate
+      the username, and because the header is scoped by URL PREFIX this covers a
+      self-hosted instance (`https://gitlab.example.com/`) exactly as it covers
+      gitlab.com -- the host in the remote URL is what the scope is built from.
+
+    Returns None when there is no https origin to scope to (a `file://`, `ssh://`
+    or bare-path remote authenticates by other means and needs no header, and an
+    absent URL cannot be scoped -- see the default in `_auth_env`).
+    """
+    if not remote_url or not remote_url.lower().startswith(("http://", "https://")):
+        return None
+    host = remote_host(remote_url)
+    if not host:
+        return None
+    scheme = remote_url.split("://", 1)[0].lower()
+    origin = f"{scheme}://{host}/"
+    if host == "github.com":
+        pair = f"{pat}:x-oauth-basic"
+    else:
+        pair = f"oauth2:{pat}"
+    basic = base64.b64encode(pair.encode()).decode()
+    return (f"http.{origin}.extraHeader", f"Authorization: Basic {basic}")
+
+
 #: Repository config keys that can name a program for git to run. A vault is an
 #: ordinary checkout with an agent-writable ``.git/config``, so each of these is
 #: attacker-controllable and would execute outside any sandbox as a side effect
@@ -254,7 +325,7 @@ _GIT_NEUTRALIZERS: list[tuple[str, str]] = [
 ]
 
 
-def _auth_env(pat: Optional[str]) -> dict[str, str]:
+def _auth_env(pat: Optional[str], remote_url: Optional[str] = None) -> dict[str, str]:
     """Environment neutralizing repo config, plus a PAT as a one-shot header.
 
     ``GIT_CONFIG_COUNT``/``KEY``/``VALUE`` carry the same precedence as ``git
@@ -265,18 +336,21 @@ def _auth_env(pat: Optional[str]) -> dict[str, str]:
     The neutralizers and the token share ONE numbered sequence — two separate
     ``GIT_CONFIG_COUNT`` blocks cannot coexist, and the later would silently
     drop the earlier.
+
+    ``remote_url`` selects the origin the token's header is scoped to and the
+    basic-auth convention it uses (see ``_origin_header``). It defaults to
+    ``None``, which scopes to github.com with GitHub's convention -- the
+    module's historical behaviour, kept so a caller that does not thread the URL
+    through (and the header-scope test) still sends exactly the GitHub header it
+    always did.
     """
     entries = list(_GIT_NEUTRALIZERS)
     if pat:
-        # GitHub accepts the token as the basic-auth username with any password.
-        basic = base64.b64encode(f"{pat}:x-oauth-basic".encode()).decode()
-        # Scope the header to GitHub. A bare `http.extraHeader` applies to EVERY
-        # https remote, so syncing a vault hosted anywhere else would hand that
-        # host the user's GitHub token. The stored PAT comes from GitHub (the
-        # settings field or `gh auth token`), so github.com is the only origin it
-        # belongs to — a self-hosted Enterprise remote needs its own credential
-        # and is not covered here.
-        entries.append((f"http.{GITHUB_ORIGIN}.extraHeader", f"Authorization: Basic {basic}"))
+        # A `file://`, `ssh://` or bare-path remote authenticates by other means
+        # and needs no header; only an https origin gets one, scoped to its host.
+        header = _origin_header(pat, remote_url or GITHUB_ORIGIN)
+        if header:
+            entries.append(header)
 
     env = {
         # Refuse `ext::`/custom remote helpers at the protocol layer as well as
@@ -306,9 +380,7 @@ def _windows_git_bin_dirs() -> tuple[str, ...]:
     program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
     localappdata = os.environ.get("LOCALAPPDATA", "")
     roots = (
-        [program_files, os.path.join(localappdata, "Programs")]
-        if localappdata
-        else [program_files]
+        [program_files, os.path.join(localappdata, "Programs")] if localappdata else [program_files]
     )
     for root in roots:
         dirs.append(os.path.join(root, "Git", "cmd"))
@@ -378,12 +450,18 @@ async def run_git(
     cwd: Optional[str] = None,
     *,
     pat: Optional[str] = None,
+    remote_url: Optional[str] = None,
     check: bool = True,
     timeout: int = GIT_TIMEOUT_SEC,
 ) -> tuple[int, str, str]:
     """Run a git command. Returns (returncode, stdout, stderr).
 
     Never runs through a shell, so no argument can be interpreted as one.
+
+    ``remote_url`` scopes the ``pat`` header to that remote's host and picks the
+    provider's basic-auth convention (see ``_auth_env`` / ``_origin_header``).
+    Only the network invocations (clone, fetch, push) pass it; a local read has
+    no ``pat`` and needs no header.
     """
     env = {
         **os.environ,
@@ -392,7 +470,7 @@ async def run_git(
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_ASKPASS": "",
         "GCM_INTERACTIVE": "never",
-        **_auth_env(pat),
+        **_auth_env(pat, remote_url),
     }
     if os.name == "posix":
         # Pin PATH so git's own child helpers (ssh, credential helpers,
@@ -527,7 +605,7 @@ async def clone_vault(
         validate_remote_url(url),
         dir_,
     ]
-    await run_git(args, pat=pat, timeout=GIT_NETWORK_TIMEOUT_SEC)
+    await run_git(args, pat=pat, remote_url=url, timeout=GIT_NETWORK_TIMEOUT_SEC)
     vault: dict[str, Any] = {
         "id": vault_id,
         "name": name or repo_name(url),
@@ -664,9 +742,7 @@ async def status(dir_: str, subfolder: Optional[str] = None) -> list[FileChange]
             i += 1
 
     # Untracked files are additions the diff above cannot see.
-    _, untracked, _ = await run_git(
-        ["ls-files", "--others", "--exclude-standard", "-z"], dir_
-    )
+    _, untracked, _ = await run_git(["ls-files", "--others", "--exclude-standard", "-z"], dir_)
     for rel in untracked.split("\0"):
         if rel:
             changes.append(FileChange(path=rel, kind="added"))
@@ -921,9 +997,7 @@ async def repo_supplied_driver(dir_: str) -> str:
             # `remote.origin.url` still reads as the trusted URL — so the
             # trusted-remote check in sync() would not catch it. A vault has no
             # legitimate reason to set these, so refuse.
-            if k.startswith("url.") and (
-                k.endswith(".insteadof") or k.endswith(".pushinsteadof")
-            ):
+            if k.startswith("url.") and (k.endswith(".insteadof") or k.endswith(".pushinsteadof")):
                 return key.strip()
             # `core.worktree` redirects git's working tree. A blanket refusal
             # would break a legitimately-supported vault shape: git itself sets
@@ -934,9 +1008,7 @@ async def repo_supplied_driver(dir_: str) -> str:
             # effective worktree rather than parsing the (relative-to-GIT_DIR)
             # value ourselves.
             if k == "core.worktree":
-                code2, top, _ = await run_git(
-                    ["rev-parse", "--show-toplevel"], dir_, check=False
-                )
+                code2, top, _ = await run_git(["rev-parse", "--show-toplevel"], dir_, check=False)
                 if code2 != 0:
                     return "core.worktree (unverifiable)"  # fail closed
                 try:
@@ -1093,10 +1165,19 @@ async def sync(
         }
 
     # 2. Fetch the remote tip.
+    # Scope the token header to origin's actual host (github.com vs a GitLab
+    # instance vs anywhere else) rather than a fixed provider. `remote.origin.url`
+    # is the fetch URL; its identity was already checked against `trusted_remote`
+    # above, so reading it here is not a fresh trust decision, only where the
+    # header's scope comes from. First value is enough: git fetches from the
+    # single fetch URL, and a repo with none fails the `not origin_urls` check
+    # earlier.
+    origin_url = await _remote_url(dir_)
     await run_git(
         ["fetch", "origin", target],
         dir_,
         pat=pat,
+        remote_url=origin_url,
         timeout=GIT_NETWORK_TIMEOUT_SEC,
     )
     _, remote_oid_out, _ = await run_git(["rev-parse", "FETCH_HEAD"], dir_)
@@ -1159,10 +1240,19 @@ async def sync(
     # on) to the remote target branch: if the vault's checkout was switched to
     # another branch externally, pushing the stale `target` ref would report
     # success while the remote never received the note.
+    # `git push` uses `remote.origin.pushurl` when set, else the fetch url, so
+    # scope the token header to whichever git will actually contact. Both were
+    # already checked against `trusted_remote` above (that check reads pushurl
+    # too), so this only selects the header scope, it is not a fresh trust call.
+    _, pushurl_out, _ = await run_git(
+        ["config", "--get", "remote.origin.pushurl"], dir_, check=False
+    )
+    push_url = pushurl_out.strip() or origin_url
     push_code, _, push_err = await run_git(
         ["push", "--no-signed", "origin", f"HEAD:{target}"],
         dir_,
         pat=pat,
+        remote_url=push_url,
         check=False,
         timeout=GIT_NETWORK_TIMEOUT_SEC,
     )
@@ -1171,7 +1261,9 @@ async def sync(
         # notes — reporting success here would tell the user their work is
         # backed up when it is only on this machine.
         logger.warning("md-notebook: push to origin/%s failed: %s", target, push_err.strip())
-        raise GitError(f"pulled and merged, but the push to {target} was rejected: {push_err.strip()}")
+        raise GitError(
+            f"pulled and merged, but the push to {target} was rejected: {push_err.strip()}"
+        )
     return {
         "pushed": True,
         "pulled": True,

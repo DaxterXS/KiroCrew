@@ -209,7 +209,7 @@ async def _sync_vault(vault: dict[str, Any]) -> None:
     result = await git_ops.sync(
         vault["localPath"],
         branch=vault.get("branch"),
-        pat=await server.resolve_auth(),
+        pat=await server.resolve_auth(vault.get("remoteUrl")),
         subfolder=vault.get("subfolder"),
         trusted_remote=vault.get("remoteUrl"),
         trusted_gitdir=vault.get("gitDir"),
