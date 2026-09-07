@@ -57,9 +57,7 @@ def _recorder(sink: list[tuple[int, int]]) -> Callable[[int, int], None]:
 
 
 def _raw_semantic_embedding(store: VectorMemoryStore, key: str) -> bytes | None:
-    row = store.db.execute(
-        "SELECT embedding FROM semantic_memory WHERE key = ?", (key,)
-    ).fetchone()
+    row = store.db.execute("SELECT embedding FROM semantic_memory WHERE key = ?", (key,)).fetchone()
     return None if row is None else row["embedding"]
 
 
@@ -231,9 +229,7 @@ class TestRetireStaleEpisodicTextFallback:
         entry = store.get_semantic("pref.editor")
         assert entry is not None and entry["value_json"] == '"emacs"'
 
-    def test_rephrased_references_are_retired_via_vector_similarity(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rephrased_references_are_retired_via_vector_similarity(self, tmp_path: Path) -> None:
         """With an embedder the retirement also runs the vector-similarity sweep."""
         store = _store(tmp_path)
         store.embed_fn = _fixed_embed()
@@ -395,9 +391,7 @@ class TestContradictionCandidateBlobRecovery:
         keys = [e["key"] for e in store.get_lessons()]
 
         # One blob too short to hold a single float, one that unpacks unevenly.
-        store.db.execute(
-            "UPDATE semantic_memory SET embedding = ? WHERE key = ?", (b"ab", keys[0])
-        )
+        store.db.execute("UPDATE semantic_memory SET embedding = ? WHERE key = ?", (b"ab", keys[0]))
         store.db.execute(
             "UPDATE semantic_memory SET embedding = ? WHERE key = ?", (b"abcde", keys[1])
         )
@@ -533,19 +527,17 @@ class TestBackfillSweeps:
 class TestLessonDedup:
     def test_a_rule_already_covered_by_a_longer_lesson_is_dropped(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
-        assert store.write_lesson(
-            "Always pin the release tag before publishing a wheel to the CDN"
-        )
+        assert store.write_lesson("Always pin the release tag before publishing a wheel to the CDN")
         assert store.write_lesson("pin the release tag").wrote is False
         assert len(store.get_lessons()) == 1
 
     def test_a_longer_rule_replaces_the_lesson_it_contains(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         assert store.write_lesson("pin the release tag")
-        assert store.write_lesson(
+        assert store.write_lesson("Always pin the release tag before publishing a wheel to the CDN")
+        assert _lesson_texts(store) == [
             "Always pin the release tag before publishing a wheel to the CDN"
-        )
-        assert _lesson_texts(store) == ["Always pin the release tag before publishing a wheel to the CDN"]
+        ]
 
     def test_an_unpackable_stored_vector_does_not_break_the_dedup_scan(
         self, tmp_path: Path
@@ -553,9 +545,7 @@ class TestLessonDedup:
         store = _store(tmp_path)
         assert store.write_lesson("Prefer allowlists over denylists for network egress")
         key = store.get_lessons()[0]["key"]
-        store.db.execute(
-            "UPDATE semantic_memory SET embedding = ? WHERE key = ?", (b"abcde", key)
-        )
+        store.db.execute("UPDATE semantic_memory SET embedding = ? WHERE key = ?", (b"abcde", key))
         store.db.commit()
 
         store.embed_fn = _fixed_embed()
@@ -912,9 +902,7 @@ class TestMigrateFromMarkdown:
         # duplicate + too-short child + oversized project name
         assert counts["skipped"] == 3
         rows = store.get_episodic_list(tag_filter=["redwood"])
-        assert [r["text"] for r in rows] == [
-            "The consolidation pass writes semantic keys nightly"
-        ]
+        assert [r["text"] for r in rows] == ["The consolidation pass writes semantic keys nightly"]
 
     def test_history_directory(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         home = self._home(tmp_path, monkeypatch)
@@ -950,9 +938,7 @@ class TestMigrateFromMarkdown:
         home = self._home(tmp_path, monkeypatch)
         history = home / "workspace" / "memory" / "history"
         history.mkdir()
-        (history / "a.md").write_text(
-            "[2026-01-01] " + ("w " * 2000) + "\n", encoding="utf-8"
-        )
+        (history / "a.md").write_text("[2026-01-01] " + ("w " * 2000) + "\n", encoding="utf-8")
         store = _store(tmp_path)
         assert store.migrate_from_markdown()["episodic"] == 1
         stored = store.get_episodic_list()[0]["text"]
@@ -1123,9 +1109,7 @@ class TestSqliteVectorSearchRanking:
         store = _store(tmp_path)
         long_text = "Long form retrospective paragraph about the rollout. " * 8
         assert len(long_text) > vm._EPISODIC_LONG_TEXT_CHARS
-        assert store.write_episodic(
-            long_text, embedding=[1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
-        )
+        assert store.write_episodic(long_text, embedding=[1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
         hits = store.search_episodic(
             query_embedding=_unit(0), limit=5, mmr=False, relevance_filter=True
         )
@@ -1206,6 +1190,27 @@ class TestLessonDedupPaths:
         assert len(texts) == 1
         assert "never merge upward" in texts[0]
 
+    def test_a_terse_lesson_does_not_supersede_a_detailed_one(self, tmp_path: Path) -> None:
+        """The overlap ratio is measured against the LARGER keyword set.
+
+        Against the smaller one it reads "how much of the shorter rule the longer one
+        covers", which is ~1.0 for any terse near-truism — so a three-word rule scored
+        past the 50% threshold and DELETED eighteen words of real guidance, reporting
+        success. Neither rule here is a substring of the other and the store has no
+        embedder, so the topic-overlap branch is the only one that can fire.
+        """
+        detailed = (
+            "Shell arguments must always be quoted when you interpolate them into a "
+            "bash command, because unquoted globbing silently rewrites every "
+            "filesystem path"
+        )
+        store = _store(tmp_path)
+        assert store.write_lesson(detailed)
+        assert store.write_lesson("Quote shell arguments")
+        texts = _lesson_texts(store)
+        assert detailed in texts
+        assert "Quote shell arguments" in texts
+
     def test_a_negative_example_is_stored_as_its_own_field(self, tmp_path: Path) -> None:
         store = _store(tmp_path)
         assert store.write_lesson("Quote shell arguments", negative="bare interpolation")
@@ -1271,6 +1276,39 @@ class TestLessonDedupPaths:
         assert result.reason == "semantic_similarity"
         assert result.superseded == ()
         assert _lesson_texts(store) == [taught]
+
+    def test_small_keyword_subset_cannot_bypass_semantic_source_authority(
+        self, tmp_path: Path
+    ) -> None:
+        """The authority pre-pass and mutating topic branch classify the same pair."""
+        taught = (
+            "Shell arguments must always be quoted when you interpolate them into a "
+            "bash command, because unquoted globbing silently rewrites every "
+            "filesystem path"
+        )
+        inferred = "Quote shell arguments"
+        store = _store(tmp_path)
+        try:
+            store.embed_fn = _TableEmbedder({taught: _unit(0), inferred: _unit(0)})
+            taught_words = store._lesson_keywords(taught.lower())
+            inferred_words = store._lesson_keywords(inferred.lower())
+            overlap = len(taught_words & inferred_words)
+            assert overlap / min(len(taught_words), len(inferred_words)) >= 0.5
+            assert overlap / max(len(taught_words), len(inferred_words)) < 0.5
+            assert taught.lower() not in inferred.lower() and inferred.lower() not in taught.lower()
+            assert store.write_lesson(taught, source="user_explicit")
+            before = store.get_lessons()
+            events = store.get_events()
+
+            result = store.write_lesson(inferred, source="consolidation")
+
+            assert result.outcome is LessonWriteOutcome.DEDUPED
+            assert result.reason == "semantic_similarity" and result.superseded == ()
+            assert store.get_lessons() == before
+            assert store.get_events() == events
+            assert _lesson_texts(store) == [taught]
+        finally:
+            store.close()
 
     def test_semantic_supersede_lets_a_user_explicit_correction_replace_an_inferred_lesson(
         self, tmp_path: Path
@@ -1338,9 +1376,7 @@ class TestLessonDedupPaths:
         vec_b = [0.6, 0.8] + [0.0] * (_DIM - 2)
         vec_sub = [0.894, 0.447] + [0.0] * (_DIM - 2)
         store = _store(tmp_path)
-        store.embed_fn = _TableEmbedder(
-            {taught: vec_a, inferred: vec_b, submitted: vec_sub}
-        )
+        store.embed_fn = _TableEmbedder({taught: vec_a, inferred: vec_b, submitted: vec_sub})
         assert store.write_lesson(taught)  # user_explicit, older
         assert store.write_lesson(inferred, source="consolidation")  # newer
         assert sorted(_lesson_texts(store)) == sorted([taught, inferred])
@@ -1449,9 +1485,7 @@ class TestLessonDedupPaths:
 
         new_key = _lesson_key(new_rule)
         backfilled = [
-            e
-            for e in store.get_lessons()
-            if e["key"] != new_key and e["embedding"] is not None
+            e for e in store.get_lessons() if e["key"] != new_key and e["embedding"] is not None
         ]
         assert len(backfilled) == vm._MAX_BACKFILLS_PER_CALL
 
@@ -1531,7 +1565,9 @@ class TestLessonDedupPaths:
         the whole turn, so an unexpected value has to degrade to "omit it".
         """
         store = _store(tmp_path)
-        store.set_semantic_if_absent("lesson.emptyrule000", {"category": "preference"}, 1.0, "import")
+        store.set_semantic_if_absent(
+            "lesson.emptyrule000", {"category": "preference"}, 1.0, "import"
+        )
         store.set_semantic_if_absent("lesson.listshape000", ["not", "a", "lesson"], 1.0, "import")
         ctx = store.get_lessons_context()
         assert "category" not in ctx
@@ -1590,8 +1626,7 @@ class TestEpisodicBackfillSweep:
         assert seen[0] == (0, 3)
         assert seen[-1] == (3, 3)
         assert all(
-            _raw_episodic_embedding(store, r["id"]) is not None
-            for r in store.get_episodic_list()
+            _raw_episodic_embedding(store, r["id"]) is not None for r in store.get_episodic_list()
         )
 
     def test_the_sweep_is_idempotent(self, tmp_path: Path) -> None:

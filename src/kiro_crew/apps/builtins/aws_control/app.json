@@ -2,7 +2,7 @@
   "name": "aws-control",
   "version": "0.1.0",
   "displayName": "AWS Control",
-  "description": "Your cloud accounts, in plain language. See every AWS account Kiro Crew can use with a health light per account and matched reconnect guidance, plus an S3-backed cloud drive — files, a cloud artifact library, and backups — with time-boxed share links. Nothing is public unless you say so, and every paid service asks for your confirmation before it can bill you.",
+  "description": "View available AWS accounts with health and reconnect guidance. S3 holds files, artifacts and backups with expiring share links. Nothing is public without permission; paid services ask before billing.",
   "author": "kirocrew",
   "license": "MIT",
   "defaultEnabled": false,

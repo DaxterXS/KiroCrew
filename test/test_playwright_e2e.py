@@ -52,7 +52,8 @@ _WEBSITE = "website"
 #
 # RAISE this when you add specs. Only LOWER it with a written reason in the
 # commit body: a drop means specs stopped running.
-MIN_EXECUTED_SPECS = 224
+# The offline browser floor adds ten member memory scenarios to the base floor.
+MIN_EXECUTED_SPECS = 234
 
 # Skips are silent passes. A spec should seed its preconditions rather than skip
 # when they are absent, so the intended steady state is zero. Specs excluded by
@@ -185,6 +186,52 @@ def test_dashboard_playwright_suite() -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "playwright-results.json"
             with spawn_feature_gateway(fixture="minimal", approval="reads") as gw:
+                from kiro_crew.config.loader import update_config_locked
+
+                # A new-member API request already provisions private memory, so
+                # it cannot represent an existing install's uninitialized alias.
+                # Seed only this gateway's disposable config before the browser
+                # starts. Each CI retry gets a fresh legacy identity; initialization
+                # must never be undone just to reset a test.
+                legacy_members = [f"memory-e2e-legacy-{attempt}" for attempt in range(3)]
+                invalid_memory_bindings = [
+                    {
+                        "unavailable_member": f"memory-e2e-unavailable-{attempt}",
+                        "unavailable_store": f"memory-e2e-missing-store-{attempt}",
+                        "mismatched_member": f"memory-e2e-mismatched-{attempt}",
+                        "mismatched_store": f"memory-e2e-mismatched-store-{attempt}",
+                        "declared_owner": f"memory-e2e-other-owner-{attempt}",
+                    }
+                    for attempt in range(3)
+                ]
+
+                def _seed_legacy_members(data: dict) -> dict:
+                    agents = data.setdefault("agents", {})
+                    for name in legacy_members:
+                        assert name not in agents
+                        agents[name] = {"kiro_agent": "kirocrew", "memory_store": "default"}
+                    # Intentional bad configuration, confined to gw.home. These
+                    # declarations do not represent healthy peer stores and do
+                    # not create or modify any memory directory or database.
+                    stores = data.setdefault("memory_stores", {})
+                    for broken in invalid_memory_bindings:
+                        for kind in ("unavailable", "mismatched"):
+                            name = broken[f"{kind}_member"]
+                            assert name not in agents
+                            agents[name] = {
+                                "kiro_agent": "kirocrew",
+                                "memory_store": broken[f"{kind}_store"],
+                            }
+                        store = broken["mismatched_store"]
+                        assert store not in stores
+                        assert broken["unavailable_store"] not in stores
+                        stores[store] = {
+                            "memory_version": 2,
+                            "owner_member": broken["declared_owner"],
+                        }
+                    return data
+
+                update_config_locked(gw.home / "config.json", mutate=_seed_legacy_members)
                 env = dict(os.environ)
                 env.update(
                     {
@@ -200,6 +247,8 @@ def test_dashboard_playwright_suite() -> None:
                         # isolated tmp KIROCREW_HOME (spawn_feature_gateway --test-mode),
                         # so its slots are disposable.
                         "KIROCREW_E2E_EPHEMERAL": "1",
+                        "KIROCREW_E2E_LEGACY_MEMBERS": json.dumps(legacy_members),
+                        "KIROCREW_E2E_INVALID_MEMORY_BINDINGS": json.dumps(invalid_memory_bindings),
                         # CI mode: serial workers + retries:2 (absorbs gateway-load
                         # timeout flakes) + html reporter, per playwright.config.ts.
                         "CI": "1",
@@ -249,16 +298,12 @@ def test_floor_accepts_a_run_at_the_floor(tmp_path: Path) -> None:
 
 def test_floor_counts_flaky_as_executed(tmp_path: Path) -> None:
     """CI runs retries:2, so a flake absorbed by a retry still ran."""
-    report = _write_report(
-        tmp_path, expected=MIN_EXECUTED_SPECS - 1, flaky=1, skipped=0
-    )
+    report = _write_report(tmp_path, expected=MIN_EXECUTED_SPECS - 1, flaky=1, skipped=0)
     _assert_suite_not_darkened(report)  # must not raise
 
 
 def test_floor_rejects_a_collapsed_spec_count(tmp_path: Path) -> None:
-    report = _write_report(
-        tmp_path, expected=MIN_EXECUTED_SPECS - 1, flaky=0, skipped=0
-    )
+    report = _write_report(tmp_path, expected=MIN_EXECUTED_SPECS - 1, flaky=0, skipped=0)
     with pytest.raises(AssertionError, match="specs executed, floor is"):
         _assert_suite_not_darkened(report)
 
@@ -273,7 +318,5 @@ def test_floor_fails_when_the_report_is_missing(tmp_path: Path) -> None:
     """A missing report must fail loudly, not pass for lack of evidence."""
     # pytest.fail raises Failed, which derives from BaseException, so a plain
     # `pytest.raises(Exception)` would not catch it.
-    with pytest.raises(
-        pytest.fail.Exception, match="could not read Playwright JSON report"
-    ):
+    with pytest.raises(pytest.fail.Exception, match="could not read Playwright JSON report"):
         _assert_suite_not_darkened(tmp_path / "absent.json")

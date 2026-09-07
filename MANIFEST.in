@@ -35,7 +35,10 @@ recursive-include src/kiro_crew/apps *.json
 # for apps ported from third-party work; Apache-2.0 attribution must ship.
 recursive-include src/kiro_crew/apps *.md
 recursive-include src/kiro_crew/eval/scenarios *.json
-recursive-include src/kiro_crew/eval/bench/data *.json
+include src/kiro_crew/eval/bench/data/kb_golden_v1.json
+include src/kiro_crew/eval/bench/data/kb_golden_v2.json
+exclude src/kiro_crew/eval/bench/data/member-v2-hybrid-*.json
+exclude src/kiro_crew/eval/bench/data/memory-edit-scale.json
 recursive-include src/kiro_crew/docs *.md
 # The generated settings registry beside those docs (see settings-deeplink.md).
 # `[options.package_data]`'s `docs/*.json` covers the WHEEL only; the sdist is

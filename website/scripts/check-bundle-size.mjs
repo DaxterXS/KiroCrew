@@ -88,7 +88,12 @@ export const CHUNK_BUDGETS = {
   // merged analyze build measures the chunk at 807,525 B (788.6 KB); keep
   // roughly 5% headroom (matching the `all` entry's convention above) over that
   // combined measurement so expected catalog growth does not block descendants.
-  t: 819 * KB, // measured 788.6 KB on the merged (structured-monitor + managed-credentials) build (~3.7% headroom)
+  // The V1/V2 memory editor, ownership, conflict-review and recovery copy
+  // added 11,929 B against the earlier e7db5f5b8 base: the pre-integration
+  // chunk was 804,764 B (785.9 KB), with the same 12-module runtime/catalog
+  // graph. English stays synchronous by the i18n owner contract. Retain the
+  // memory ceiling here; CI measures the bundle after integration with main.
+  t: 826 * KB, // pre-integration memory measurement: 785.9 KB (~5% headroom)
 
   // Pierre editor implementation (PR #4072 replaced Monaco, whose
   // 'editor.api2' chunk this entry set used to carry) -- the code-editor

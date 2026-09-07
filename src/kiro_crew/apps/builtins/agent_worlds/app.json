@@ -2,7 +2,7 @@
   "name": "agent-worlds",
   "version": "1.0.0",
   "displayName": "Agent Worlds",
-  "description": "Turns your running agents into characters in an animated pixel-art scene, so a glance tells you how busy Kiro Crew is. Each active agent appears as a sprite that reacts as work starts and finishes, across themed scenes from a classic office to a wizard tower or an underwater lab. Pop it out into its own window to keep it on a second screen while you work.",
+  "description": "See active agents as animated pixel-art characters that react when work starts or finishes. Choose office, wizard tower or underwater lab scenes; pop out the view for a second screen.",
   "author": "kirocrew",
   "tags": [
     "visualization",

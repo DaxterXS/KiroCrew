@@ -1,0 +1,11 @@
+{
+  "title": "a legacy configured default member keeps V1 until its owner creates empty private memory",
+  "status": "passed",
+  "expectedStatus": "passed",
+  "retry": 0,
+  "checkoutSha": "e74dbe6ec831747774c3906698ddef7a7d4c94b9",
+  "runId": "34433763685",
+  "runAttempt": "1",
+  "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+  "video": "member-memory-walkthrough.webm"
+}

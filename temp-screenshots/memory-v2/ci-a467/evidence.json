@@ -1,0 +1,756 @@
+{
+  "repository": "kirodotdev/KiroCrew",
+  "capture_source_head": "a46796234356c217d5fd531f21e1ca7a1c026b86",
+  "capture_checkout_sha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+  "capture_tree": "e5aa351b60a7d37156f8de6d4dba646bc1e8e828",
+  "source_tree_equals_capture_tree": true,
+  "run_id": 34446574480,
+  "job_id": 102772791932,
+  "job_conclusion": "success",
+  "job_completed_at": "2026-09-10T07:01:18Z",
+  "wrapper_result": {
+    "passed": 18,
+    "warnings": 2,
+    "duration_seconds": 473.82
+  },
+  "memory_scenarios": {
+    "passed": 10,
+    "failed": 0,
+    "retries": 0,
+    "run_attempt": 1
+  },
+  "artifact_counts": {
+    "memory_png": 35,
+    "memory_webm": 10,
+    "memory_receipts": 10,
+    "gallery_png": 2
+  },
+  "artifacts": [
+    {
+      "artifact": {
+        "id": 10140337375,
+        "node_id": "MDg6QXJ0aWZhY3QxMDE0MDMzNzM3NQ==",
+        "name": "member-memory-ui-evidence",
+        "size_in_bytes": 7486290,
+        "url": "https://api.github.com/repos/kirodotdev/KiroCrew/actions/artifacts/10140337375",
+        "archive_download_url": "https://api.github.com/repos/kirodotdev/KiroCrew/actions/artifacts/10140337375/zip",
+        "expired": false,
+        "digest": "sha256:9f746b08cdcb56ac2ea39281d38ba1dfa853513855774e9008a6cc9d866659d4",
+        "created_at": "2026-09-10T07:01:15Z",
+        "updated_at": "2026-09-10T07:01:15Z",
+        "expires_at": "2026-09-17T07:01:14Z",
+        "workflow_run": {
+          "id": 34446574480,
+          "repository_id": 1303258850,
+          "head_repository_id": 1303258850,
+          "head_branch": "feat/memory-v2-ui",
+          "head_sha": "a46796234356c217d5fd531f21e1ca7a1c026b86"
+        }
+      },
+      "zip_bytes": 7486290,
+      "zip_sha256": "9f746b08cdcb56ac2ea39281d38ba1dfa853513855774e9008a6cc9d866659d4"
+    },
+    {
+      "artifact": {
+        "id": 10140337772,
+        "node_id": "MDg6QXJ0aWZhY3QxMDE0MDMzNzc3Mg==",
+        "name": "gallery-copy-ui-evidence",
+        "size_in_bytes": 209369,
+        "url": "https://api.github.com/repos/kirodotdev/KiroCrew/actions/artifacts/10140337772",
+        "archive_download_url": "https://api.github.com/repos/kirodotdev/KiroCrew/actions/artifacts/10140337772/zip",
+        "expired": false,
+        "digest": "sha256:1f287e5acbc9f716a3e3a2508ef86086958b440a6d68f5fc1da80331e9a4e355",
+        "created_at": "2026-09-10T07:01:16Z",
+        "updated_at": "2026-09-10T07:01:16Z",
+        "expires_at": "2026-09-17T07:01:15Z",
+        "workflow_run": {
+          "id": 34446574480,
+          "repository_id": 1303258850,
+          "head_repository_id": 1303258850,
+          "head_branch": "feat/memory-v2-ui",
+          "head_sha": "a46796234356c217d5fd531f21e1ca7a1c026b86"
+        }
+      },
+      "zip_bytes": 209369,
+      "zip_sha256": "1f287e5acbc9f716a3e3a2508ef86086958b440a6d68f5fc1da80331e9a4e355"
+    }
+  ],
+  "scenarios": [
+    {
+      "title": "V1 previews and atomically edits 65 email memories across pages, preserving a concurrent correction",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "V1 refuses an automated overwrite and persists an explicit owner correction",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "V2 previews and atomically edits 65 email memories across pages, preserving a concurrent correction",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "V2 reviews proposals by keeping the current value and accepting a later proposal",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "a legacy configured default member keeps V1 until its owner creates empty private memory",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "an empty private memory opens its exact member conversation and reuses the persisted thread after reload",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "intentional bad memory configuration shows unavailable, mismatch and a real identity retry",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [
+        "Intentional invalid config in the disposable gateway home; no healthy peer store or automatic repair claim. All responses come from the real gateway."
+      ],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "member memory copy, correction and forgetting persist without changing V1 or another member",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "private backup staging can be cancelled and a replaced experience can be restored in place",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-evidence.json"
+    },
+    {
+      "title": "switching memory stores keeps a draft until the owner explicitly discards it",
+      "status": "passed",
+      "expectedStatus": "passed",
+      "retry": 0,
+      "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+      "runId": "34446574480",
+      "runAttempt": "1",
+      "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+      "fixtureNotes": [],
+      "video": "member-memory-walkthrough.webm",
+      "original_path": "member-memory-switching-me-3055d-wner-explicitly-discards-it-chromium/member-memory-evidence.json"
+    }
+  ],
+  "original_files": [
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 502525,
+      "sha256": "0fa4f59e065dca1762286e999ff7c8d7ed4b4120ef8dd8db6d4b3950a390f4d3",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-edit-dialog.png",
+      "bytes": 122064,
+      "sha256": "28f8b0db3af66f5ec713e4a8dfb0d2a56eb68657a370006f7c5d27c79db89440",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-preview-mobile.png",
+      "bytes": 58164,
+      "sha256": "c047723bb1973e061f040738c8943a00faac9df18905f0f20fcd710d27361ef6",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+      "bytes": 471,
+      "sha256": "fab4153e81fc4ce89074343239326ba125ddd1cd35fcadc773c4a304def21da6",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-selection.png",
+      "bytes": 116572,
+      "sha256": "c1e5a00b196a5cd15cc880ffbd0da4ce106e6ed0f96cd6c95c962e6eb3895c84",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-forget-preview-mobile.png",
+      "bytes": 59861,
+      "sha256": "b7f76fa68e3576c9153fa53a9bb15087edf46cd178512f119be4b692b20391a2",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-global-overview.png",
+      "bytes": 114069,
+      "sha256": "67bdd1b4317ec4d17c515c5c81fc98fcd3ebe80a0728c793c52ad2bf27a96fb1",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-evidence.json",
+      "bytes": 447,
+      "sha256": "25b0682dc336ab4ffaf06c5804bf9b515f501fd5162732baa95d820ad8251f2e",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 319051,
+      "sha256": "f30b03d7b67f617b7a8dfd08989465820ee4a13d53e219ddb187e37a3fc5158f",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+      "bytes": 471,
+      "sha256": "95482b7e731fa99ee42befc3dfdd32b6ca4f238c119f4e95463692005421690c",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 443677,
+      "sha256": "a0d49a863a2bab3fcf4901c23b433a607e95d3545f0f5f538dc11fa7f2bf1bdc",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-edit-dialog.png",
+      "bytes": 127452,
+      "sha256": "1918a602ee419b578fc5599e94eb45663e4a85ebc23cdc5eb2844d121cdb9b79",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-preview-mobile.png",
+      "bytes": 60755,
+      "sha256": "96be4cfed55aec5d7913f37f2ad7bd59c2fa2e593bd959772b36af5ef5558f98",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-selection.png",
+      "bytes": 124621,
+      "sha256": "27b66a4709998db53d358658571a8415453eaee6f767478b52925759c398b9cd",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-forget-preview-mobile.png",
+      "bytes": 58700,
+      "sha256": "b7ca49c61fe63ba5f0002dda9aa09304f7af19a1352f6e1e3df5e759fe336272",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-evidence.json",
+      "bytes": 452,
+      "sha256": "4205032541958a6672b6465a0d33d7b938c100963b41ee9d59403cc9ac3a8ab5",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-review-proposals.png",
+      "bytes": 128641,
+      "sha256": "b46139c634f47ac30580a51c46fc5defcb38ee53c8ea30be19ad1fbc4556840f",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-walkthrough.webm",
+      "bytes": 587039,
+      "sha256": "19081b0e4196f1b5b712b7b0ca13dc308e8ca33166b379672cfb1c77d8bd4ba7",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/legacy-member-memory-v1-choice.png",
+      "bytes": 123390,
+      "sha256": "01155f32ee28709c04a323593ad06b2967e532132db313522a943107f3fb2226",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/legacy-member-memory-v1-working.png",
+      "bytes": 87474,
+      "sha256": "ef97f538924c38ae992001cd3550ed705bacdf6903bc6a0ff3ba28347e4d016f",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/legacy-member-memory-v2-confirm.png",
+      "bytes": 94729,
+      "sha256": "70f6433b76009567a267e49920fb77fbcc2736b68a0d9e4f5fbf2ca076a04ded",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/legacy-member-memory-v2-empty.png",
+      "bytes": 104046,
+      "sha256": "06c2fc325fd36963b772f9d1a11e026656f0ebefe2949a5024e14aa762393f8b",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/member-memory-manage-disabled-draft.png",
+      "bytes": 129231,
+      "sha256": "4e03e0a9d829dea9f47a11c8389366447c384302c99de7966e5c993b81fa3e5d",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/member-memory-walkthrough.webm",
+      "bytes": 560554,
+      "sha256": "93294741de03f5e121870037ddf5eb74682c095e2599185938c19f8541b7f278",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/member-memory-evidence.json",
+      "bytes": 460,
+      "sha256": "2b422097aaa95a9591b6ba2c91c7a119759b0093da9f484b7a8339f693ebb30c",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-evidence.json",
+      "bytes": 476,
+      "sha256": "ffd98418e167bd2f20deb03d5c77782ec65dc6b6aa39b134328f40d9ae459b3a",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-walkthrough.webm",
+      "bytes": 160590,
+      "sha256": "66ce836795248d9a8f4b81f572eca8c47b2c6eb24e73781427213b60f8a0f78b",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-evidence.json",
+      "bytes": 621,
+      "sha256": "86802d578469adf3d7e99b32a86dd2d4c4537ec6960b5f626b2794131eed8f48",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-members-status.png",
+      "bytes": 127604,
+      "sha256": "27f8ded9eb03fd14db9a799caa65eb4407a2e3bbff5be29d44e3823448f1ff99",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-identity-retry-unavailable.png",
+      "bytes": 70186,
+      "sha256": "df9cdf72210b338070b031db1e78fabdcf2c83f7061b2b7f43936900f175511c",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-mismatched-binding.png",
+      "bytes": 125766,
+      "sha256": "cd992f426e79ecbe38facda3fa36c7ae560469ae45f060d947856ea9f790a1ab",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-unavailable-binding.png",
+      "bytes": 124504,
+      "sha256": "855c663c6d00896f897d0629b89ce8b14137d6d9bd9a30bdfd506cfd4aa39a83",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-walkthrough.webm",
+      "bytes": 272690,
+      "sha256": "5f1f7ed9dc57c044c9d3f3c8d5e500fb31c70b9cc5b51b3fa07472a10b200f27",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-copy-dialog.png",
+      "bytes": 103573,
+      "sha256": "3fba92c6825b9d67e61a802dedeac36da698ff1156f02d725838f71bed302419",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-correction-preview.png",
+      "bytes": 90084,
+      "sha256": "8da7efbf923e35712324d1fdce3101c09816c4833d6087d463a8f4ab397f3a4b",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-desktop.png",
+      "bytes": 112764,
+      "sha256": "642d1a0ada8115163967599f1031b02b6b51d0e17a42e9aee854ea6078ae3433",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-details-desktop.png",
+      "bytes": 113896,
+      "sha256": "6eb5abfabec53ee5cf4972e20bb20fe6607fecaa36b7dcc0cadd48b5c406c803",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-evidence.json",
+      "bytes": 463,
+      "sha256": "2215b8a2235e479ad3e61cbf5a529b51d9dc523c056b4887376dbc87f1aca5aa",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-owner-empty.png",
+      "bytes": 104776,
+      "sha256": "e06d82376435116e5b2a3fd13ba04eeb9ab48ad442bd2687fd3a5977428e6894",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-mobile.png",
+      "bytes": 54166,
+      "sha256": "7c86061e66355755048c533ddaf07f528a2e925426d17989d73c2b206f2015b5",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-profile.png",
+      "bytes": 100671,
+      "sha256": "2155bf440738330d485b7bc6cf97b3744952bf1e191ddf221ff13209d8b52e5d",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-recall-before.png",
+      "bytes": 100275,
+      "sha256": "808e214a9c97dc79adfcb6329dcb72ae73f5f2834dd0b904c3640e01683c94e3",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-recall-evidence.png",
+      "bytes": 115989,
+      "sha256": "13cf7fd894174089ccd9110b5d31f4c61d23f968685d1c05441d4e5838776b66",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-separate-empty-member.png",
+      "bytes": 104731,
+      "sha256": "6e4d30bbc24a0f7d0dec139a37ad17cca0eeb69790b4313a532d845b6624d306",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-walkthrough.webm",
+      "bytes": 684409,
+      "sha256": "3da720b70085969ec46232615d19eb2ec4de6c9c2eb412d39ab404b5de86ed8e",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-advanced-analysis.png",
+      "bytes": 86616,
+      "sha256": "917b8a75808a133e02ce71cc4dda410c46d18760131137b3641aadcd350456cc",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-evidence.json",
+      "bytes": 462,
+      "sha256": "f9cb4d90d46a27019d252e650ea4a9455b1ecf2c7033e5a3a1b8632cdd737219",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-replaced-experience.png",
+      "bytes": 110150,
+      "sha256": "69ad364dbd3cc3413ed084a3497fdc284a393fde62699abfd7cc4228356452d5",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-restore-cancelled.png",
+      "bytes": 113246,
+      "sha256": "fcc9e8e1c46a3f9353293fe417a505c83c7d6f6f1511151c755f930b77b06b24",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-restore-confirm.png",
+      "bytes": 118325,
+      "sha256": "9b78f71145e6edf687f7552a14d1ed63cd7545a777fc48e2dabefa73f0669c7b",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-restore-pending.png",
+      "bytes": 117731,
+      "sha256": "79da4e02756629d9047ad4df9e9d69a6bca81de95b8670a74a11c7319e4de511",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-restored-experience.png",
+      "bytes": 121872,
+      "sha256": "eee3fde04c2b00e20c0c1c181659a62407b68590ceb520ab42a83dbebf2501c7",
+      "artifact_lane": "memory",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-walkthrough.webm",
+      "bytes": 368001,
+      "sha256": "d363ca950f6ff7c0e5d17a183e9ed571955a0f1923e609454a1d2d7fc68d60e5",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "member-memory-switching-me-3055d-wner-explicitly-discards-it-chromium/member-memory-evidence.json",
+      "bytes": 448,
+      "sha256": "c9c84cf08003f76a691bd6b1e10baebcf6407440cd0385ef55dc0eb00d3ee5b6",
+      "artifact_lane": "memory"
+    },
+    {
+      "path": "member-memory-switching-me-3055d-wner-explicitly-discards-it-chromium/member-memory-walkthrough.webm",
+      "bytes": 213669,
+      "sha256": "8604b369e6218854154178ba4f85df443b083926af6f9981ce785e2035b4cf05",
+      "artifact_lane": "memory",
+      "visual_review": "1-fps sampled contact sheet viewed; not uninterrupted playback",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "apps-App-Detail-Page-—-app-ad82d-me-renders-app-detail-views-chromium/gallery-copy-desktop.png",
+      "bytes": 138897,
+      "sha256": "75720ea39c8efc5581067c37141b9124eb33eaf775831bae1ebf299b3c496e53",
+      "artifact_lane": "gallery",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    },
+    {
+      "path": "apps-App-Detail-Page-—-app-ad82d-me-renders-app-detail-views-chromium/gallery-copy-mobile.png",
+      "bytes": 74072,
+      "sha256": "40059d325d666b325985bdf710eb546ed84cc59ad72459739ab4bac4dcac676e",
+      "artifact_lane": "gallery",
+      "visual_review": "original viewed",
+      "reviewer": "/root/retro_60fccbad"
+    }
+  ],
+  "video_samples": [
+    {
+      "source": "member-memory-a-legacy-con-90cba-reates-empty-private-memory-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "93294741de03f5e121870037ddf5eb74682c095e2599185938c19f8541b7f278",
+      "sample_count": 16,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "c6572ca942ffac4f8f76fdbd076de6fcfcec4de7117e57e81022892a9b4e5323",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "66ce836795248d9a8f4b81f572eca8c47b2c6eb24e73781427213b60f8a0f78b",
+      "sample_count": 5,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "eefbb53840672838ef42e6512e30d8bd425c50d9b79b6f4bf4d326e55ff8f059",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-intentional--ea726-h-and-a-real-identity-retry-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "5f1f7ed9dc57c044c9d3f3c8d5e500fb31c70b9cc5b51b3fa07472a10b200f27",
+      "sample_count": 7,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "c36fa80d2dc8bb44f9a6ef5c93be9bc6dc298dada3b7776f9fdadd926194c998",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "3da720b70085969ec46232615d19eb2ec4de6c9c2eb412d39ab404b5de86ed8e",
+      "sample_count": 10,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "b3c1167c5a0acb0c6ef8afe33f8b9aec7c16d2f569101abd67e09dc670ec2ded",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-private-back-b6e51-ce-can-be-restored-in-place-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "d363ca950f6ff7c0e5d17a183e9ed571955a0f1923e609454a1d2d7fc68d60e5",
+      "sample_count": 7,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "d78dc29f751d92bafe332da9c40251b32eef112f88dac3bbf2cf54e0f8069149",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-switching-me-3055d-wner-explicitly-discards-it-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "8604b369e6218854154178ba4f85df443b083926af6f9981ce785e2035b4cf05",
+      "sample_count": 5,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "bc9c39d57729a1af57705ff720cb6636db00c2045d1e99e4ceb65f9a2e3db637",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "0fa4f59e065dca1762286e999ff7c8d7ed4b4120ef8dd8db6d4b3950a390f4d3",
+      "sample_count": 9,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "b2a6076f9f4c60871341d5c071de22e43bfc6668897599f884bc9c6684abccad",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "f30b03d7b67f617b7a8dfd08989465820ee4a13d53e219ddb187e37a3fc5158f",
+      "sample_count": 6,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "64fbd0a8144e45bfefd6bc39530fc6766c68f98bcdbbabdb8b87d5d5914e3127",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "a0d49a863a2bab3fcf4901c23b433a607e95d3545f0f5f538dc11fa7f2bf1bdc",
+      "sample_count": 9,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "7d68b50a7255dfae031441343e44161792c0b08ff5e6bd4d338c89a5ed211892",
+      "contact_sheet_viewed": true
+    },
+    {
+      "source": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-walkthrough.webm",
+      "source_sha256": "19081b0e4196f1b5b712b7b0ca13dc308e8ca33166b379672cfb1c77d8bd4ba7",
+      "sample_count": 9,
+      "sample_rate": "1 fps across the decoded recording",
+      "time_labels": "ordered frame samples, not original presentation timestamps",
+      "contact_sha256": "5e6c745ad47668e9b1933c91b0e35bb6ea9eb6fa7240a38c161760db993f50b4",
+      "contact_sheet_viewed": true
+    }
+  ],
+  "limitations": [
+    "The legacy setup PNG was omitted by the upload glob: legacy-member-setup-private-memory.png did not match legacy-member-memory-*.png. The source-only fix renames the output to legacy-member-memory-setup-private.png; that new capture remains pending the next CI run.",
+    "member-memory-recall-before.png captures the search loading skeleton, not a settled browse result. Returned recall evidence is shown in member-memory-recall-evidence.png.",
+    "Desktop empty states and list views end at the viewport boundary; their lower copy or subsequent records are not fully represented. Bulk-selection framing also crops the upper identity header.",
+    "Video review sampled all ten recordings at 1 fps into 83 frames. All ten contact sheets were viewed. Subsecond transitions and every intermediate action were not watched continuously; scenario outcomes come from the CI receipts and assertions.",
+    "Mobile recording frames occupy part of the original desktop video canvas after a viewport resize. The resulting blank padding is a recording artifact, not inferred application overflow.",
+    "The gallery captures show the Design Critique detail page in English at desktop and mobile sizes. They do not visually certify all seventeen compacted app descriptions or all locales.",
+    "The dashboard and gateway are real with synthetic data in an isolated install. The browser fixture uses a fake ACP provider. Backup staging/cancellation and experience restoration do not establish deployed gateway restart activation or a live provider fleet.",
+    "This E2E job passed. The a467 CI matrix is not wholly green: Frontend Tests (3) and Coverage Merge reported the same stale generated settings-registry equality failure; its source repair awaits subsequent CI."
+  ],
+  "visual_verdict": "All 37 original PNGs and all ten video contact sheets viewed. No actionable clipping or unusable control found in the inspected frames. Scope and timing limitations are listed explicitly.",
+  "publication": "Original CI media and scenario receipts copied byte for byte. Capture source is pinned independently of the later commit publishing this folder. Derived contact sheets remain in the review scratch archive; no original media was converted.",
+  "visual_review_receipt_sha256": "835700b01ad0e9be9e7663ac1230f01eb61d576da6bd9c686e491f6a3920bc81",
+  "capture_job_log_sha256": "6dc7fa8fb9f633896daecc44397619e5201b4dba1e565adfa2b75aeff3010f7c"
+}

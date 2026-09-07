@@ -1,0 +1,14 @@
+{
+  "title": "intentional bad memory configuration shows unavailable, mismatch and a real identity retry",
+  "status": "passed",
+  "expectedStatus": "passed",
+  "retry": 0,
+  "checkoutSha": "8c8aeb3821766d7bdf0fbf705ab976b410767536",
+  "runId": "34446574480",
+  "runAttempt": "1",
+  "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+  "fixtureNotes": [
+    "Intentional invalid config in the disposable gateway home; no healthy peer store or automatic repair claim. All responses come from the real gateway."
+  ],
+  "video": "member-memory-walkthrough.webm"
+}

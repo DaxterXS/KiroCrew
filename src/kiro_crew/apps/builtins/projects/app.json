@@ -2,7 +2,7 @@
   "name": "projects",
   "version": "1.0.0",
   "displayName": "Task Runner",
-  "description": "Hand over a multi-step job and let it run to completion unattended. Describe the work in plain language, paste a written spec, or upload a YAML file, then either generate a plan first to review the steps or start it straight away. Each run gets its own page showing step-by-step progress, and you can pause, resume, retry, or stop it at any point.",
+  "description": "Run multi-step jobs unattended from plain text, a spec or an uploaded YAML file. Review a generated plan or start immediately. Each run shows step-by-step progress with pause, resume, retry and stop controls.",
   "author": "kirocrew",
   "tags": [
     "tasks",

@@ -63,7 +63,7 @@
   "apps": {
     "agentWorlds": {
       "manifest": {
-        "description": "Turns your running agents into characters in an animated pixel-art scene, so a glance tells you how busy Kiro Crew is. Each active agent appears as a sprite that reacts as work starts and finishes, across themed scenes from a classic office to a wizard tower or an underwater lab. Pop it out into its own window to keep it on a second screen while you work.",
+        "description": "See active agents as animated pixel-art characters that react when work starts or finishes. Choose office, wizard tower or underwater lab scenes; pop out the view for a second screen.",
         "display_name": "Agent Worlds",
         "highlight_1": "Live view of which agents are running, as characters rather than a list",
         "highlight_2": "Themed scenes including Office, Panda Den, Neural Net, Wizard Tower, and Deep Lab",
@@ -85,7 +85,7 @@
         "staygreen": "STAYGREEN"
       },
       "manifest": {
-        "description": "Measures a GitHub repository before it changes it. Designs a calibrated performance metric (the ruler), proves the metric is trustworthy against a known win, then runs keep-or-revert improvement cycles: every candidate fix is written in an isolated worktree, gated against an edit allowlist and the repo's own tests, and kept only when the measured win clears the noise band. Survivors are drafted as GitHub pull requests you review and publish yourself.",
+        "description": "Improve a GitHub repo by designing a performance metric and validating it against a known win. Candidates run in isolated worktrees under an edit allowlist and the repo's tests. Keep only measured improvements above the noise band; revert the rest. Review and publish the surviving draft PRs yourself.",
         "display_name": "Auto-Improvement",
         "highlight_1": "Proves its own metric first — a run refuses to start on an untrustworthy ruler",
         "highlight_2": "Every candidate is measured A/B, or RED/GREEN for bug fixes, never just 'looks right'",
@@ -117,7 +117,7 @@
         "tree_is_getting_large_consider_pruning_branches": "Tree is getting large — consider pruning branches you won't pursue."
       },
       "manifest": {
-        "description": "Runs multi-cycle research campaigns that keep working after you walk away. Give it a question and it expands that into a tree of narrower sub-questions, sends agents to investigate each one, and streams findings to the page as they land. A campaign self-drives until the question is answered or it notices progress has stalled, and you can hand the finished report off to your knowledge library or a shareable artifact.",
+        "description": "Run research campaigns that split your question into subquestions, delegate them to agents, and stream findings. Campaigns continue unattended until answered or stalled. Send the final report to your knowledge library or a shareable artifact.",
         "display_name": "Research Lab",
         "highlight_1": "Expands one broad question into a scoped tree of sub-questions before spending agent time",
         "highlight_2": "Campaigns keep researching between your check-ins, with findings streamed live",
@@ -398,7 +398,7 @@
     },
     "channels": {
       "manifest": {
-        "description": "A shared room where several agents work a problem together instead of one agent working alone. You assign each agent a role, and they post progress into the channel and answer each other's @mentions in the open — there is no private agent-to-agent messaging, so the whole exchange stays readable, and you remain the approver for anything that changes state. Agents stay alive in the channel until dismissed or timed out.",
+        "description": "Give agents roles in a shared problem-solving room. Follow their progress and public @mention replies; there is no private agent messaging. You approve all state changes. Agents stay active until dismissed or timed out.",
         "display_name": "Channels",
         "highlight_1": "Several role-assigned agents collaborate in one shared, readable transcript",
         "highlight_2": "No private agent-to-agent messaging — every exchange happens in the channel",
@@ -806,7 +806,7 @@
         }
       },
       "manifest": {
-        "description": "Deep-reviews GitHub pull requests and tells you which changes actually deserve your attention. Every changed file is reviewed in its own isolated agent session, weighted by how much blast radius it carries, and rolled up into a prioritized Focus Report. Findings are staged as a draft GitHub review that stays unpublished until you submit it, and the reviewer keeps learning your repository's real standards from shipped fixes and past review comments.",
+        "description": "Review each changed PR file in an isolated agent session, weighted by impact. A prioritized Focus Report collects the findings; the GitHub review stays a draft until you submit it. Reviews learn your repository's standards from shipped fixes and earlier comments.",
         "display_name": "Code Review Sage",
         "highlight_1": "Focus Report ranks changes by blast radius so the risky files get read first",
         "highlight_2": "One isolated agent session per change, so findings never bleed between files",
@@ -865,14 +865,14 @@
     "commandBar": {
       "manifest": {
         "display_name": "Command Bar",
-        "description": "Replaces the quick-search (Cmd+K / Ctrl+K) surface with a launcher: type a command, not a query. The first page carries app commands, destinations and system settings and issues no request, so typing costs nothing. Sessions become a row you enter; searching knowledge, artifacts, skills and prompts is not available while this is enabled — disable it to get that back.",
+        "description": "Replace Cmd+K / Ctrl+K search with a command launcher for apps, destinations, and settings; its first page sends no requests. Enter Sessions to search them. Knowledge, artifact, skill, and prompt search returns when you disable it.",
         "use_case_1": "Jump to apps, settings, sessions that need attention, or a new agent request without leaving the keyboard.",
         "configuration_1": "It is enabled by default: press Cmd+K or Ctrl+K anywhere, type a command, and use the Sessions scope for recent or matching conversations."
       }
     },
     "crewCompanion": {
       "manifest": {
-        "description": "A desktop companion for Kiro Crew that helps you pace your day: it nudges you to take breaks, holds the reminders you set in plain language, and runs a short breathing exercise when you need to reset. It also lets you know when a session finishes, fails, or needs your OK.",
+        "description": "A desktop companion with break nudges, plain-language reminders, short breathing exercises, and alerts when sessions finish, fail or need approval.",
         "display_name": "Crew Companion",
         "highlight_1": "Gentle break nudges — water, stretch, look away — on an interval you choose",
         "highlight_2": "Reminders you set in plain language, like “drink water in 20 minutes”",
@@ -953,7 +953,7 @@
         "where": "Where"
       },
       "manifest": {
-        "description": "A design critique you can run before you ask a colleague. Give it one screenshot, a whole multi-screen flow, a Figma file, a git repo, or a URL that is already serving, and it finds the candidate screens, lets you choose what to look at, then reports back the way an experienced designer would: an overall read, what is working, and the things worth tightening, each tied to a named heuristic. Multi-screen flows also get cross-screen findings that a single screen cannot show — inconsistent controls, missing progress, no way back, dead ends. It renders code and Figma before judging them, so it never critiques visuals it has not actually seen, and it says plainly which screens it could not get to instead of guessing.",
+        "description": "Review a screenshot, screen flow, Figma file, git repo, or live URL. Choose the discovered screens for a heuristic-based assessment of strengths and improvements, including cross-screen consistency, progress, navigation, and dead ends. Code and Figma are rendered before review; inaccessible screens are reported.",
         "display_name": "Design Critique",
         "highlight_1": "Takes screenshots, a Figma link, a git repo, a local folder, or a running URL — and says back what it found before it starts",
         "highlight_2": "Measures contrast and hit-target sizes from the rendered page rather than estimating them from an image",
@@ -1005,7 +1005,7 @@
     },
     "devFleet": {
       "manifest": {
-        "description": "A control panel for working on Kiro Crew itself. Lists every feature worktree alongside its pull request state, commit count, and disk usage, and can bring any of them up as a pod: a complete preview instance on its own port with its own data directory, so you can click through an unfinished change without disturbing your live gateway. It also handles the chores around that — pulling main and rebuilding, rebasing a branch, streaming pod logs, and pruning worktrees whose work has already merged.",
+        "description": "Manage Kiro Crew feature worktrees with PR status, commit counts, and disk usage. Run isolated previews on separate ports and data directories without changing the live gateway. Pull main, rebuild, rebase, stream pod logs, and prune merged worktrees.",
         "display_name": "Dev Fleet",
         "highlight_1": "Bring up any worktree as an isolated pod on its own port and data directory, leaving your live gateway untouched",
         "highlight_2": "Fleet view with per-branch PR status, commit counts, and disk usage",
@@ -1040,7 +1040,7 @@
         "truncated": "· truncated"
       },
       "manifest": {
-        "description": "Browse and read files on the machine running Kiro Crew without leaving the dashboard. Keep several files open in tabs, walk the directory tree with each file's git status shown beside it, search a whole folder for a string, and read markdown rendered rather than raw. It is read-only by design: it opens and searches files but never edits, moves, or deletes them, and it can only reach your home directory plus /tmp and /opt.",
+        "description": "Read files on the Kiro Crew host in tabs, with a directory tree, Git status, folder text search, and rendered Markdown. Access is limited to your home, /tmp, and /opt. Read-only: files cannot be edited, moved, or deleted.",
         "display_name": "Files",
         "highlight_1": "Read-only: opens and searches files, and never writes, moves, or deletes them",
         "highlight_2": "Multiple files open at once in tabs, with syntax highlighting",
@@ -1677,7 +1677,7 @@
         "label": "Sync to {{productName}} knowledge"
       },
       "manifest": {
-        "description": "Keep a markdown notebook that lives in a git repository, so your notes are versioned, portable, and readable by any other editor. Point it at a GitHub repo and it clones a working copy, or attach a folder you already have — including an existing Obsidian vault — and it adopts that checkout in place without making a second copy. Notes render as formatted text you can click straight into to edit, [[wikilinks]] connect them, and every note shows what links back to it. Sync commits, pulls and pushes in one step, and a merge conflict is reported — listing the conflicted notes and aborting the merge — rather than overwriting anything.",
+        "description": "Keep a portable, versioned Markdown notebook in Git. Clone a GitHub repo or use an existing folder or Obsidian vault in place. Edit rendered notes, follow [[wikilinks]] and backlinks, and commit, pull, and push in one sync. Merge conflicts list affected notes and abort without overwriting them.",
         "display_name": "Notes",
         "highlight_1": "Your notes are plain markdown in a git repo — no lock-in, readable by Obsidian or any editor",
         "highlight_2": "Clone a GitHub repo as a vault, or attach a folder you already have without copying it",
@@ -3023,7 +3023,7 @@
         "no_source_files": "No source files."
       },
       "manifest": {
-        "description": "A LaTeX paper editor with live PDF preview and an AI co-author. Write in a split-pane editor, press Cmd+S (Ctrl+S on Windows and Linux) to compile with pdflatex or tectonic, and read the rendered PDF beside your source. Compilation errors are parsed into a clickable list that jumps to the offending line. Clone an existing paper from any git remote, then commit and push from the toolbar. The co-author panel is a real Kiro Crew chat session scoped to the paper, so the agent can read and edit your LaTeX while you watch the PDF update.",
+        "description": "Write LaTeX beside a live PDF preview and a paper-scoped Kiro Crew co-author chat that reads and edits LaTeX. Cmd+S (Ctrl+S on Windows/Linux) compiles with pdflatex or tectonic; clickable errors jump to their lines. Clone papers from any Git remote, then commit and push from the toolbar.",
         "display_name": "Papyrus",
         "highlight_1": "Split-pane LaTeX editor with a live PDF preview beside it",
         "highlight_2": "Compile on save (Cmd+S, or Ctrl+S on Windows and Linux) via pdflatex or tectonic, with the bibtex cycle run for you",
@@ -3236,7 +3236,7 @@
         "unpin_style": "Unpin this style"
       },
       "manifest": {
-        "description": "Describe the deck you want in chat and get a real .pptx back. An agent interviews you, writes a brief, an outline and an art direction, then composes every slide and generates the file — and you watch each deliverable appear in a live preview beside the conversation. Slides render as animated SVG as they are built, so you can see a deck take shape instead of waiting for a download. Reusable styles and .pptx templates let the same content come out looking like three different presentations.",
+        "description": "Create a .pptx through chat: an agent interviews you, writes a brief, outline and art direction, then builds the slides. View each deliverable beside the chat and animated SVG slides as they appear. Reuse styles and .pptx templates for different presentations.",
         "display_name": "PPTX Maker",
         "highlight_1": "Chat your way to a finished .pptx — Spec mode plans it carefully, Vibe mode turns a URL or pasted text straight into slides",
         "highlight_2": "Live preview of every deliverable: brief, outline, art direction, then slides as animated SVG while they compose",
@@ -3300,7 +3300,7 @@
     "projectScaffolder": {
       "manifest": {
         "display_name": "Create Folders From Project",
-        "description": "Point it at a project directory and it works out which sub-projects live inside, then creates a matching sidebar folder for each one. The scan is read-only, so you see the whole list and tick what you want before anything is created. Sub-projects nest under their parent the way they do on disk, and anything you have already set up is shown but never created twice.",
+        "description": "Scan a project directory read-only, then select subprojects to create matching sidebar folders. Folder nesting follows disk structure; existing entries are shown and never duplicated.",
         "page_label": "Create Folders",
         "highlight_1": "Scans read-only first, so nothing is created until you confirm a selection",
         "highlight_2": "Lists top-level packages as rows, with deeper finds behind one collapsed group you can select all or none of",
@@ -3357,7 +3357,7 @@
     },
     "projects": {
       "manifest": {
-        "description": "Hand over a multi-step job and let it run to completion unattended. Describe the work in plain language, paste a written spec, or upload a YAML file, then either generate a plan first to review the steps or start it straight away. Each run gets its own page showing step-by-step progress, and you can pause, resume, retry, or stop it at any point.",
+        "description": "Run multi-step jobs unattended from plain text, a spec or an uploaded YAML file. Review a generated plan or start immediately. Each run shows step-by-step progress with pause, resume, retry and stop controls.",
         "display_name": "Task Runner",
         "highlight_1": "Three ways in: describe the work in plain language, paste a spec, or upload YAML",
         "highlight_2": "Generate a plan and review the steps before committing to a run",
@@ -3577,7 +3577,7 @@
     },
     "workflows": {
       "manifest": {
-        "description": "Author, run, and watch dynamic workflows: Python scripts, usually written for you by an agent from a plain-English goal, that drive several Kiro Crew agents through ordered phases. A script is checked against a sandboxed set of workflow commands before anything runs, so mistakes surface without executing, and the page then streams each phase and agent event as the run progresses. Runnable examples ship with the app to start from.",
+        "description": "Create Python workflows from plain-English goals to run Kiro Crew agents through ordered phases. Scripts are checked against sandboxed workflow commands before execution. Follow live phase and agent events, or start from the included runnable examples.",
         "display_name": "Workflows",
         "highlight_1": "Validate a workflow before running it — errors surface without anything executing",
         "highlight_2": "Watch the run live, phase by phase, with per-agent progress events",
@@ -3626,7 +3626,7 @@
     },
     "awsControl": {
       "manifest": {
-        "description": "Your cloud accounts, in plain language. See every AWS account Kiro Crew can use with a health light per account and matched reconnect guidance, plus an S3-backed cloud drive — files, a cloud artifact library, and backups — with time-boxed share links. Nothing is public unless you say so, and every paid service asks for your confirmation before it can bill you.",
+        "description": "View available AWS accounts with health and reconnect guidance. S3 holds files, artifacts and backups with expiring share links. Nothing is public without permission; paid services ask before billing.",
         "display_name": "AWS Control",
         "highlight_1": "One health light per account, each with reconnect guidance matched to how the profile authenticates",
         "highlight_2": "Private, encrypted, versioned storage that is created only after you confirm it",
@@ -3987,8 +3987,6 @@
       "replace_mine": "Replace mine",
       "scanning_for_agent_setup": "Scanning for agent setup",
       "selected_setup": "Selected setup",
-      "skip_all": "Skip all",
-      "skip_all_setup_and_onboarding": "Skip all setup and onboarding",
       "skip_import": "Skip import",
       "skipped": "Skipped",
       "try_again": "Try again",
@@ -4543,18 +4541,13 @@
       "ask_the_kiro_crew_owner_to_install_kiro_cli_and": "Ask the {{productName}} owner to install Kiro CLI and sign in on this gateway. This dashboard\n          will open for you as soon as the gateway is ready.",
       "check_again": "Check again",
       "complete": "Complete",
-      "copy_sign_in_command": "Copy sign-in command",
-      "could_not_check_kiro_cli": "Could not check Kiro CLI.",
       "gateway": "gateway",
       "gateway_host": "gateway host",
       "gateway_setup_required": "Gateway setup required",
       "install_kiro_cli_sign_in_once_and_kiro_crew_will": "Install Kiro CLI, sign in once, and {{productName}} will take it from here.",
       "kiro_crew_uses_kiro_cli_as_its_agent_engine_comp": "{{productName}} uses Kiro CLI as its agent engine. Complete these two steps on the",
-      "or_run_in_terminal": "or run in terminal:",
-      "refresh": "Refresh",
       "retry_the_gateway_check_before_starting_a_sessio": "Retry the gateway check before starting a session.",
       "secure_setup_on_your_gateway_host": "Secure setup on your gateway host",
-      "sessions_are_paused_until_the_gateway_check_succ": "Sessions are paused until the gateway check succeeds. Your artifacts, settings, and\n              history remain available.",
       "set_up_kiro": "Set up Kiro",
       "setup": "Setup",
       "setup_check_unavailable": "Setup check unavailable",
@@ -4893,10 +4886,7 @@
       "sessions_restarted_but_mcp_sync_failed": "Sessions restarted, but MCP sync failed — check gateway logs"
     },
     "runInTerminalBtn": {
-      "cancel": "Cancel",
-      "confirm_run_sensitive_command": "Confirm run sensitive command",
       "couldn_t_run_in_terminal": "Couldn't run in terminal",
-      "run_anyway": "Run anyway",
       "run_in_terminal": "Run in terminal",
       "sent_to_terminal": "Sent to terminal"
     },
@@ -5848,8 +5838,6 @@
       "forked_from": "Forked from",
       "from_session": "from session",
       "heads_up": "Heads up:",
-      "iterate": "Iterate",
-      "iterate_discuss_this_artifact_with_the_agent": "Iterate — discuss this artifact with the agent",
       "live": "Live",
       "loading": "Loading…",
       "local_changes_not_yet_published_to": "Local changes not yet published to",
@@ -6698,19 +6686,15 @@
     },
     "kiroCrewAgentsPage": {
       "add_crew_member": "Add crew member",
-      "additional_stores_coming_with_memory_v2": "Only the default store is available today — support for more memory stores is coming soon.",
       "agents": "Agents",
       "also_used_by_these_crews": "Also used by {{crews}}. Agents that share a store can read each other’s files and memory.",
-      "bindings_preview_info": "Preview. Isolated memory per agent is still being built. An agent has its own workspace folder, but semantic memory, recall of past conversations, and global lessons reach every agent, so changing this does not separate what an agent remembers yet.",
-      "bindings_preview_notice": "Preview. An agent already reads and writes its own workspace folder, but what it remembers is not separated yet: semantic memory, recall of past conversations, and global lessons reach every agent. Isolated memory per agent is on the way.",
+      "bindings_preview_info": "Memory V2 follows the member through private chats, Crew delegation, scheduled work and restart. Starting knowledge is copied only when you select it.",
+      "bindings_preview_notice": "New members get private Memory V2. Existing members keep their configured Memory V1 until you choose Create private memory for them.",
       "cancel": "Cancel",
-      "chat_with_this_crew": "Chat with this agent",
       "copy_from_optional": "Copy from (optional)",
       "copy_from_workspace": "Copy from workspace",
       "create": "Create",
       "create_a_crew_to_give_an_agent_its_own_workspace": "An agent is an assistant with its own files and its own memory. Make one per kind of work so they never mix up what they have learned.",
-      "create_a_new_crew": "Create a new agent",
-      "create_agent": "Create Agent",
       "create_member": "Create member",
       "create_workspace": "Create Workspace",
       "create_your_first_crew": "Create your first agent",
@@ -6747,10 +6731,8 @@
       "manage_agent_workspace_memory_store_bindings": "Separate assistants for separate jobs. Each agent keeps its own files.",
       "member_already_exists": "A member named '{{name}}' already exists. Choose another name.",
       "memory_store": "Memory Store",
-      "memory_store_hint_member": "Which memory store this member is bound to. The binding is recorded, but it does not give the member a memory of its own yet.",
       "model": "Model",
       "name": "Name",
-      "new_crew": "New agent",
       "new_sessions_use": "New sessions use",
       "new_workspace_action": "+ New workspace…",
       "no_crews_match_your_filter": "No agents match your filter",
@@ -6782,7 +6764,6 @@
       "view_cards_tooltip": "Roomy cards showing what each agent uses",
       "view_list": "List",
       "view_list_tooltip": "Compact table, one row per agent",
-      "which_store_its_lessons_and_history_are_written": "Which memory store this agent is bound to. The binding is recorded, but it does not give the agent a memory of its own yet.",
       "workspace": "workspace",
       "workspace_2": "Workspace",
       "workspace_hint_member": "The folder this member reads and writes. Switch it and new chats start fresh in the new folder; the old one is kept.",
@@ -6982,8 +6963,6 @@
       "member_count_other": "{{count}} members",
       "member_gone": "Showing {{shown}} — “{{name}}” is no longer on the roster.",
       "member_gone_roster": "“{{name}}” is no longer on the roster.",
-      "memory_dedicated_note": "Preferences and project notes come from the {{store}} store rather than the shared default. Conversation memory and lessons are not separated yet: what you tell this member is still known to every member.",
-      "memory_shared_note": "Members currently share one memory. What you tell one member is known to all of them.",
       "memory_store": "Memory store",
       "model": "Model",
       "opening_thread": "Opening the conversation…",
@@ -7252,7 +7231,6 @@
         "loading": "Loading…",
         "memory_settings": "Memory Settings",
         "no_history_yet": "No history yet",
-        "no_lessons": "No lessons",
         "no_lessons_yet": "No lessons yet",
         "no_sessions_to_consolidate_start_a_chat_first": "No sessions to consolidate — start a chat first",
         "preference": "preference",
@@ -7359,7 +7337,6 @@
         "injection_on_help": "When a skill trigger matches, the full SKILL.md is added to the prompt. Keep this on when the complete procedure should be included for every matching topic.",
         "injection_update_failed": "Could not update this skill. Try again.",
         "loaded_by": "Loaded by",
-        "no_skills_installed": "No skills installed",
         "no_skills_yet": "No skills yet",
         "on_demand": "on-demand",
         "package": "Package",
@@ -7517,6 +7494,43 @@
         "this_range": "Total for these dates",
         "unreachable_body": "The service or your API key could not be reached. Your data was not lost, try again shortly.",
         "unreachable_title": "WakaTime is unreachable"
+      },
+      "memoryBackupsCard": {
+        "a_restored_database_is_read_from_the_next_time_t": "Restart to use the restored database. Until then, the old one stays active.",
+        "actions": "Actions",
+        "back_up_now": "Back up now",
+        "backups": "Backups",
+        "cancel": "Cancel",
+        "confirm_restore": "Confirm restore",
+        "copies_taken": "Copies taken: {{value}}",
+        "failed": "Failed: {{value}}",
+        "no_backups_yet": "No backups yet",
+        "restore": "Restore backup",
+        "restored_the_database_it_replaced_was_kept_besid": "Restored. Previous database saved as <name/>.",
+        "size": "Size",
+        "taken": "Taken"
+      },
+      "memoryCarveCard": {
+        "clear_filter": "Clear filter",
+        "count_by": "Count by",
+        "memory": "Memory",
+        "not_recorded": "not recorded"
+      },
+      "memoryRetiredCard": {
+        "actions": "Actions",
+        "memory": "Memory",
+        "not_recorded": "not recorded",
+        "unknown": "unknown"
+      },
+      "memoryStoreCard": {
+        "backups": "Backups: <v/>",
+        "memory_store": "Memory store",
+        "newest_backup": "Newest backup: <v/>",
+        "only_the_signed_in_dashboard_owner_can_address_a": "Only the signed-in owner can choose a store. No selection means Global Memory V1.",
+        "this_install_does_not_declare_a_memory_store_by": "Store no longer declared. Choose another.",
+        "this_store_has_no_database_file_that_can_be_read": "No database yet. It appears after the first saved memory. Backups remain available.",
+        "this_store_is_declared_but_its_database_could_no": "This database could not be opened. Nothing is shown from another store.",
+        "unknown": "unknown"
       }
     },
     "overviewPage": {
@@ -7688,7 +7702,6 @@
       "new": "New",
       "next_run": "Next Run",
       "no_cron_jobs": "No cron jobs",
-      "no_matching_jobs": "No matching jobs",
       "no_scheduled_jobs_yet": "No scheduled jobs yet",
       "ok": "OK",
       "open_chat": "Open Chat",
@@ -7899,7 +7912,6 @@
         "a_newer_version_is_available": "A newer version is available.",
         "apache_2_0": "Apache 2.0",
         "auto_update_on_restart": "Auto-update on restart",
-        "automatic_updates_are_unavailable_in_this_build": "Automatic updates are unavailable in this build",
         "automatically_pull_and_apply_updates_when_the_ga": "Automatically pull and apply updates when the gateway restarts",
         "autonomous_agent_management_runs_locally_open_so": "Autonomous agent management · runs locally · open source",
         "browse_this_branch_on_github": "Browse this branch on GitHub",
@@ -7989,12 +8001,8 @@
       "chatPanel": {
         "about_you": "About You",
         "answer_only_details_on_request": "Answer only — plainest words, details on request",
-        "auto_add_documents": "Auto-Add Documents",
-        "auto_add_saved_artifacts": "Auto-Add Saved Artifacts",
         "auto_compact_threshold": "Auto-Compact Threshold",
-        "auto_ingest_limit_per_scan": "Auto-Ingest Limit Per Scan",
         "auto_open_git_panel": "Auto-Open Git in Side Panel",
-        "auto_register_project_documents": "Auto-Register Project Documents",
         "combine_follow_up_messages_into_a_single_labeled": "Combine follow-up messages into a single labeled prompt while the agent is busy",
         "compact_is_the_original_view_comfortable_and_ful": "Compact is the original view. Comfortable and Full use more screen space.",
         "completion_event_characters": "Completion Event Characters",
@@ -8030,19 +8038,15 @@
         "how_file_diff_chips_appear_below_assistant_messa": "How file diff chips appear below assistant messages",
         "how_long_models_think_before_answering_by_defaul": "How long models think before answering by default. Higher is slower and costs more. Only available on reasoning-capable models (Opus, Sonnet, Fable, GPT-5.x).",
         "how_long_to_wait_for_the_agent_to_honor_a_stop_p": "How long to wait for the agent to honor a Stop press before forcefully killing the session. Longer budgets preserve session state more often but make stops feel laggy when agents are stuck in long tool calls.",
-        "how_much_an_automatically_registered_source_may_i": "How much an automatically-registered source may take in one pass. Each piece of a document costs one extraction call, so this is what bounds the cost; newest documents land first and the rest follow on later passes. 0 removes the bound. Default {{count}}.",
         "how_terse_the_agent_s_prose_is_ultra_concise_cap": "How terse the agent's prose is. Ultra-concise keeps the whole reply short: answer first, bullets over paragraphs, no filler. Code, commands, and error strings stay verbatim at every level; security warnings always appear but stay brief, and multi-step instructions stay complete. Answer-only goes further and drops explanation entirely: one sentence at most, and detail only when you ask for it — or when a decision is consequential enough (security, exposure, data loss, spend, anything hard to undo) that you need the reasoning to choose correctly.",
         "immediate_mode_shows_raw_chunks_as_they_arrive_s": "Immediate mode shows raw chunks as they arrive. Smooth mode buffers and fades text in at a steady pace.",
         "keep_your_computer_awake_while_a_task_is_running": "Keep your computer awake while a task is running",
         "kiro_matches_vocabulary_and_examples_to_your_pro": "Kiro matches vocabulary and examples to your professional background",
         "kiro_quotes_this_back_to_itself_when_calibrating": "Kiro uses this description to adapt vocabulary and examples to your role.",
-        "knowledge_library": "Knowledge Library",
-        "let_the_agent_add_documents_it_reads_while_workin": "Let the agent add documents it reads while working to your knowledge library, so they stay searchable later. The agent reads documents with tools you approve; {{productName}} does not fetch them directly. Added documents appear in one “Auto-added” source you can remove in a click.",
         "link_previews": "Link Previews",
         "mcp_apps_in_side_panel": "MCP Apps in Side Panel",
         "merge_queued_messages": "Merge Queued Messages",
         "messages": "Messages",
-        "mirror_documents_you_save_as_artifacts_into_the_l": "Mirror documents you save as artifacts into the library, keep them in sync as you edit, and remove them when you delete the artifact.",
         "model": "Model",
         "multiline_wraps_suggestions_onto_multiple_rows_s": "Multiline wraps suggestions onto multiple rows. Single line keeps them on one horizontally-scrollable row.",
         "new_sessions_start_in_autopilot_mode_plan_approv": "New sessions start in autopilot mode (plan → approve → execute). You can still toggle individual sessions.",
@@ -8054,7 +8058,6 @@
         "prevent_sleep_while_running": "Prevent sleep while running",
         "quick_send": "Quick Send",
         "re_open_recently_active_sessions_on_startup": "Re-open recently active sessions on startup",
-        "register_the_documents_of_each_project_you_work_i": "Register the documents of each project you work in, so its design docs, specs and READMEs become searchable without adding the folder by hand. Documents only — never source code, agent instructions or generated files.",
         "render_interactive_mcp_apps_in_the_right_side_pa": "Render interactive MCP Apps (such as Excalidraw diagrams) in the right side panel instead of inline in the chat. The panel opens automatically.",
         "response_verbosity": "Response Verbosity",
         "restore_sessions": "Restore Sessions",
@@ -8169,14 +8172,12 @@
         "commonly": "(commonly",
         "configured_instances": "Configured remote instances",
         "connection_method": "Connection method",
-        "dashboard_url": "dashboard.url",
         "default_credential_chain": "default credential chain",
         "disable_multi_instance_management": "Disable remote instance management",
         "disabled_in_config_restart_the_gateway": "Disabled in config. Restart the gateway (",
         "disconnect": "Disconnect",
         "dismiss": "Dismiss",
         "dismiss_diagnosis": "Dismiss diagnosis",
-        "distinct": "distinct",
         "ec2_instance_id_i_or_ssm_managed_instance_id_mi": "EC2 instance id (i-…) or SSM managed-instance id (mi-…).",
         "enable_it_to_let_this_gateway_open_ssh_tunnels_t": "Enable it to let this gateway open tunnels (SSH or AWS SSM) to your remote instances and switch\n          between them from the top tab bar.",
         "enabled": "enabled",

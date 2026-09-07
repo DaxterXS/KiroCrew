@@ -2,7 +2,7 @@
   "name": "channels",
   "version": "1.0.0",
   "displayName": "Channels",
-  "description": "A shared room where several agents work a problem together instead of one agent working alone. You assign each agent a role, and they post progress into the channel and answer each other's @mentions in the open — there is no private agent-to-agent messaging, so the whole exchange stays readable, and you remain the approver for anything that changes state. Agents stay alive in the channel until dismissed or timed out.",
+  "description": "Give agents roles in a shared problem-solving room. Follow their progress and public @mention replies; there is no private agent messaging. You approve all state changes. Agents stay active until dismissed or timed out.",
   "author": "kirocrew",
   "tags": [
     "collaboration",

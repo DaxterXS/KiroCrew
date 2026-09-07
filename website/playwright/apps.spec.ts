@@ -150,11 +150,21 @@ test.describe('Library Page — /apps/library', () => {
 })
 
 test.describe('App Detail Page — /apps/detail/:name', () => {
-  test('renders detail view for Task Runner', async ({ page }) => {
+  test('renders app detail views', async ({ page }, testInfo) => {
     await gotoDetail(page, 'projects')
     // The detail page shows the display name
     await expect(page.locator('text=Task Runner').first()).toBeVisible({ timeout: 10000 })
     await expect(page.getByRole('button', { name: 'Back to Apps' })).toBeVisible()
+    // Retain real desktop and mobile evidence for the compact gallery copy.
+    await gotoDetail(page, 'design-critique')
+    const description = page.getByText(/^Review a screenshot, screen flow, Figma file/)
+    await expect(description).toBeVisible()
+    await description.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath('gallery-copy-desktop.png') })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await description.scrollIntoViewIfNeeded()
+    await expect(description).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('gallery-copy-mobile.png') })
   })
 
   test('shows "App Not Found" for a nonexistent app', async ({ page }) => {
