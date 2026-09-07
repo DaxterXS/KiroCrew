@@ -163,6 +163,7 @@ jobs:
       # instruction injected into the diff could redirect over the extracted
       # contract and forge a clean verdict against a rewritten rubric.
       - name: Prefetch the change as data files
+        id: prefetch
         if: >-
           github.event.pull_request.head.repo.full_name == github.repository
           && (
@@ -195,22 +196,53 @@ jobs:
           # naming the read as the cause; a genuinely empty description reads
           # successfully on the first attempt and is judged as written, which
           # is correct.
-          raw=""
+          # ONE description read feeds BOTH consumers (#8925): the byte-exact raw
+          # `.body` is written to a FILE (redirection preserves every byte,
+          # including trailing newlines that a `$(...)` capture would strip), and
+          # that SAME file is what the freshness digest hashes AND what the
+          # reviewer's intent is built from below. gh's built-in jq (no external
+          # jq). The digest is therefore of exactly the body the reviewer judged,
+          # and reproducible byte-for-byte as
+          # `gh pr view --json body -q .body | sha256sum`. The title is fetched
+          # only to frame the intent; it is not what the digest attests, so its
+          # own capture is immaterial.
+          body_file="$(mktemp)"
+          title=""
           read_ok=""
           for attempt in 1 2 3; do
-            if raw="$(gh api "repos/$REPO/pulls/$PR" --jq '"Title: \(.title)\n\nDescription:\n\(.body // "")"')"; then
+            if gh api "repos/$REPO/pulls/$PR" --jq '.body // ""' > "$body_file"; then
               read_ok=1
               break
             fi
-            echo "Reading the PR title and description failed on attempt $attempt."
+            echo "Reading the PR description failed on attempt $attempt."
             if [ "$attempt" -lt 3 ]; then
               sleep "$attempt"
             fi
           done
           if [ -z "$read_ok" ]; then
-            echo "::error::Could not read this PR's title and description from the API after 3 attempts, so the review would judge a PR that appears to state no intent. This is a read failure, not a missing description -- re-run this job."
+            echo "::error::Could not read this PR's description from the API after 3 attempts, so the review would judge a PR that appears to state no intent. This is a read failure, not a missing description -- re-run this job."
             exit 1
           fi
+          title=""
+          title_ok=""
+          for attempt in 1 2 3; do
+            if title="$(gh api "repos/$REPO/pulls/$PR" --jq '.title // ""')"; then
+              title_ok=1
+              break
+            fi
+            echo "Reading the PR title failed on attempt $attempt."
+            [ "$attempt" -lt 3 ] && sleep "$attempt"
+          done
+          if [ -z "$title_ok" ]; then
+            # Fail CLOSED (#8925 review): the title is part of the intent the
+            # reviewer judges. A read that proceeds with an empty title emits a
+            # verdict that never saw the intent it was meant to honour --
+            # indistinguishable on the page from one that did. Do not swallow it.
+            echo "::error::Could not read this PR's title from the API after 3 attempts. This is a read failure -- re-run this job."
+            exit 1
+          fi
+          # Reviewer intent = title framing + the SAME body bytes from body_file.
+          raw="$(printf 'Title: %s\n\nDescription:\n' "$title"; cat "$body_file")"
           # Strip embedded media: a screenshot-heavy body is pure cost to a
           # reviewer that judges prose, and an attachment URL is not intent.
           stripped="$(printf '%s' "$raw" | perl -0777 -pe 's/!\[[^\]]*\]\([^)]*\)/[image removed]/g; s{<img\b[^>]*>}{[image removed]}gi; s{<video\b.*?</video>}{[video removed]}gsi; s{<source\b[^>]*>}{[media removed]}gi; s{https?://\S*user-attachments\S*}{[media removed]}g' 2>/dev/null || printf '%s' "$raw")"
@@ -239,6 +271,15 @@ jobs:
             printf '\n[description TRUNCATED at 8000 bytes]\n' >> "$INTENT"
           fi
           rm -f "$full"
+          # Freshness digest of the SAME body_file the reviewer intent was built
+          # from (#8925): one description read feeds both, so the token attests to
+          # exactly the body the reviewer judged. Byte-exact and reproducible as
+          # `gh pr view --json body -q .body | sha256sum | cut -c1-12` (identical
+          # gh-jq `.body` bytes). sha256sum reads the FILE directly, so no
+          # command-substitution strips a trailing newline.
+          digest="$(sha256sum "$body_file" | cut -c1-12)"
+          rm -f "$body_file"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "Wrote the diff ($(wc -c < "$PATCH") bytes) and the PR intent ($(wc -c < "$INTENT") bytes) as data files."
 
       - name: Resolve human override
@@ -391,6 +432,11 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          # Freshness digest of the description this run judged (#8925). Computed
+          # in the "Prefetch the change as data files" step from the SAME intent
+          # file the reviewer reads, so the token names exactly the body the
+          # verdict was formed against, not a separately-read one.
+          DESC_DIGEST: ${{ steps.prefetch.outputs.digest }}
           EXEC_FILE: ${{ steps.review.outputs.execution_file }}
           HUMAN_OVERRIDE: ${{ steps.human_override.outputs.active }}
           OVERRIDE_ACTOR: ${{ steps.human_override.outputs.actor }}
@@ -506,11 +552,17 @@ jobs:
           esac
           if [ -n "$badge" ]; then
             # Valid verdict → post the review body (redacted below).
+            # $DESC_DIGEST (from the prefetch step) is the digest of the exact
+            # intent file the reviewer judged, so the token dates the verdict
+            # against that description -- not the head sha, which is identical
+            # across the stale and corrected states (#8925).
             {
               echo "$MARKER"
               echo "## First Principles Review (Fable 5) — $badge"
               echo
               echo "_Premise-level review of \`$HEAD\` — why this exists and whether the shipped surface is the smallest honest version. Updated in place on each push. **A BLOCK verdict blocks PR readiness**; PASS/CONCERNS are advisory._"
+              echo
+              echo "<sub>Judged the PR description at \`[REVIEWED-DESCRIPTION ${DESC_DIGEST:-}]\`. This lane has no \`edited\` trigger, so a description-derived finding is stale once this token stops matching \`gh pr view --json body -q .body | sha256sum | cut -c1-12\` on the current description — verify before trusting it.</sub>"
               echo
               printf '%s\n' "$summary"
             } > "${RUNNER_TEMP:-/tmp}/fp-comment.md"

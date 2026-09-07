@@ -296,9 +296,53 @@ jobs:
           # mistaken for prompt structure.
           nonce="$(openssl rand -hex 16)"
           echo "nonce=$nonce" >> "$GITHUB_OUTPUT"
-          raw="$(gh pr view "$PR" --repo "$REPO" --json title,body \
-            --jq '"Title: " + .title + "\n\nDescription:\n" + (if (.body // "") == "" then "(no description provided)" else .body end)' \
-            2>/dev/null || true)"
+          # ONE description read feeds BOTH consumers (#8925): the byte-exact raw
+          # `.body` is written to a FILE (redirection preserves every byte,
+          # including trailing newlines a `$(...)` capture would strip), and that
+          # SAME file is what the freshness digest hashes AND what the reviewer
+          # intent is built from below. gh's built-in jq (no external jq). The
+          # digest is of exactly the body the reviewer judged, reproducible as
+          # `gh pr view --json body -q .body | sha256sum`. Title is framing only.
+          body_file="$(mktemp)"
+          title=""
+          read_ok=""
+          for attempt in 1 2 3; do
+            if gh pr view "$PR" --repo "$REPO" --json body -q .body > "$body_file"; then
+              read_ok=1
+              break
+            fi
+            echo "Reading the PR description failed on attempt $attempt."
+            [ "$attempt" -lt 3 ] && sleep "$attempt"
+          done
+          if [ -z "$read_ok" ]; then
+            # Fail CLOSED (#8925 review): a read that never succeeds must not
+            # publish an empty-description digest as authoritative.
+            echo "::error::Could not read this PR's description after 3 attempts, so the review would judge and stamp an empty description. This is a read failure, not a missing description -- re-run this job."
+            exit 1
+          fi
+          title=""
+          title_ok=""
+          for attempt in 1 2 3; do
+            if title="$(gh pr view "$PR" --repo "$REPO" --json title -q .title)"; then
+              title_ok=1
+              break
+            fi
+            echo "Reading the PR title failed on attempt $attempt."
+            [ "$attempt" -lt 3 ] && sleep "$attempt"
+          done
+          if [ -z "$title_ok" ]; then
+            # Fail CLOSED (#8925 review): the title is part of the intent the
+            # reviewer judges; a verdict that never saw it is a blind verdict.
+            echo "::error::Could not read this PR's title after 3 attempts. This is a read failure -- re-run this job."
+            exit 1
+          fi
+          # Reviewer intent = title framing + the SAME body bytes; keep the
+          # "(no description provided)" placeholder when the body is empty.
+          if [ -s "$body_file" ]; then
+            raw="$(printf 'Title: %s\n\nDescription:\n' "$title"; cat "$body_file")"
+          else
+            raw="$(printf 'Title: %s\n\nDescription:\n(no description provided)' "$title")"
+          fi
           # Strip embedded media (markdown images, HTML <img>/<video>/<source>,
           # bare user-attachment URLs) BEFORE capping — long, and no review signal.
           intent="$(printf '%s' "$raw" | perl -0777 -pe '
@@ -323,6 +367,14 @@ jobs:
             echo "truncated=0" >> "$GITHUB_OUTPUT"
           fi
           echo "Captured PR intent ($(wc -c < "$INTENT_FILE") bytes) for the scope check."
+          # Freshness digest of the SAME body_file the reviewer intent was built
+          # from (#8925): one description read feeds both, so the token attests to
+          # exactly the body the reviewer judged. Byte-exact and reproducible as
+          # `gh pr view --json body -q .body | sha256sum | cut -c1-12`. sha256sum
+          # reads the FILE directly, so no command-substitution strips a newline.
+          digest="$(sha256sum "$body_file" | cut -c1-12)"
+          rm -f "$body_file"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Install review CLI
         env:
@@ -1070,6 +1122,9 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ steps.pr.outputs.pr }}
           HEAD: ${{ steps.pr.outputs.head_sha }}
+          # Freshness digest of the description this run judged (#8925), from the
+          # SAME intent file the reviewer reads in the "Fetch PR intent" step.
+          DESC_DIGEST: ${{ steps.intent.outputs.digest }}
           ADJ_DECISION: ${{ steps.adj.outputs.decision }}
           ADJ_NOTE: ${{ steps.adj.outputs.note }}
         run: |
@@ -1097,6 +1152,8 @@ jobs:
             echo "## GPT 5.6 Review (fork) — $verdict"
             echo
             echo "_Reviewed \`$HEAD\` via the fork AI-review pipeline; updated in place on each push._"
+            echo
+            echo "<sub>Judged the PR description at \`[REVIEWED-DESCRIPTION ${DESC_DIGEST:-}]\`. This lane has no \`edited\` trigger, so a description-derived finding is stale once this token stops matching \`gh pr view --json body -q .body | sha256sum | cut -c1-12\` on the current description — verify before trusting it.</sub>"
             echo
             if [ -n "$note" ]; then
               echo "$note"

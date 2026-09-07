@@ -254,6 +254,47 @@ jobs:
           # The reviewer reads the fork's changes from the diff file as DATA.
           echo "Fetched authentic diff ($(wc -c < "$PATCH") bytes); reviewing against the trusted base tree."
 
+      # Capture the PR description ONCE and use this single value for BOTH the
+      # reviewer's stated-intent input AND the freshness digest in the verdict
+      # (#8925). This fork lane has no PR payload (it triggers on workflow_run),
+      # so it reads the description via `gh pr view` HERE, once -- rather than
+      # letting the model read it live and the post step read it again, two
+      # reads a mid-run edit could split. The model is handed THIS file (below)
+      # and the post step digests THIS same file. Fetched on the runner into a
+      # data file (the reviewer's sandbox has no network and read-only tools).
+      - name: Capture PR description (single source for review + digest)
+        id: desc
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.pr }}
+          DESC_FILE: ${{ runner.temp }}/pr-description.txt
+        run: |
+          set -uo pipefail
+          # ONE description read feeds BOTH consumers (#8925): the byte-exact raw
+          # `.body` is written to DESC_FILE by REDIRECTION (every byte preserved,
+          # including trailing newlines a `$(...)` capture would strip), the
+          # reviewer reads that file, and the freshness digest hashes that SAME
+          # file. So the token attests to exactly the body the reviewer judged and
+          # is reproducible byte-for-byte as
+          # `gh pr view --json body -q .body | sha256sum | cut -c1-12`. Fail CLOSED
+          # rather than stamping an empty digest.
+          read_ok=""
+          for attempt in 1 2 3; do
+            if gh pr view "$PR" --repo "$REPO" --json body -q .body > "$DESC_FILE"; then
+              read_ok=1
+              break
+            fi
+            echo "Reading the PR description failed on attempt $attempt."
+            [ "$attempt" -lt 3 ] && sleep "$attempt"
+          done
+          if [ -z "$read_ok" ]; then
+            echo "::error::Could not read this PR's description after 3 attempts, so the review would judge and stamp an empty description. This is a read failure, not a missing description -- re-run this job."
+            exit 1
+          fi
+          echo "file=$DESC_FILE" >> "$GITHUB_OUTPUT"
+          echo "digest=$(sha256sum "$DESC_FILE" | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
       # Mint short-lived, Bedrock-only creds immediately before the model call,
       # via the SAME dedicated least-privilege role the same-repo design reviewer
       # uses. No dependabot special-casing: forks never run as dependabot[bot].
@@ -308,8 +349,9 @@ jobs:
             directory is the UNMODIFIED trusted base. Inspect ONLY the changes in
             that patch (read
             the surrounding base files with Read/Grep to judge them); do NOT run
-            `git diff` against a fork ref. Read the PR title/description for the
-            stated problem and intent.
+            `git diff` against a fork ref. Read the PR description captured for
+            this run at `${{ steps.desc.outputs.file }}` for the stated problem
+            and intent.
 
             REPO CONTEXT: KiroCrew is an open-source AI agent platform (Python
             backend + React/TS dashboard), a de-Amazoned public fork. Do NOT flag
@@ -550,6 +592,9 @@ jobs:
           PR: ${{ steps.pr.outputs.pr }}
           HEAD: ${{ steps.pr.outputs.head_sha }}
           VERDICT: ${{ steps.verdict.outputs.verdict }}
+          # Freshness digest of the description this run judged (#8925), from the
+          # SAME file the reviewer reads in the "Capture PR description" step.
+          DESC_DIGEST: ${{ steps.desc.outputs.digest }}
           REVIEW_OUTCOME: ${{ steps.review.outcome }}
         run: |
           set -uo pipefail
@@ -564,11 +609,17 @@ jobs:
           esac
           if [ -n "$badge" ] && [ -s "$f" ]; then
             # Valid verdict → post the (redacted) review body.
+            # DESC_DIGEST (from the "Capture PR description" step) is the digest
+            # of the exact file the reviewer judged, so the token dates the
+            # verdict against that description -- not the head sha, which is
+            # identical across the stale and corrected states (#8925).
             {
               echo "$MARKER"
               echo "## Design Review (Fable 5, fork) — $badge"
               echo
               echo "_Design-level review of \`$HEAD\` via the fork AI-review pipeline — updated in place on each push. **A BLOCK verdict blocks PR readiness**; PASS/CONCERNS are advisory._"
+              echo
+              echo "<sub>Judged the PR description at \`[REVIEWED-DESCRIPTION ${DESC_DIGEST:-}]\`. This lane has no \`edited\` trigger, so a description-derived finding is stale once this token stops matching \`gh pr view --json body -q .body | sha256sum | cut -c1-12\` on the current description — verify before trusting it.</sub>"
               echo
               cat "$f"
             } > "$RUNNER_TEMP/design-comment.md"

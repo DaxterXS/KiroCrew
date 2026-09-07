@@ -1580,19 +1580,41 @@ class TestIntentReadFailureFailsClosed:
             else "Prefetch the change as data files"
         )
         script = _step_script(workflow, step)
-        start = script.index('raw=""')
+        start = script.index('body_file="$(mktemp)"')
         end = script.index("# Strip embedded media")
         return script[start:end]
 
-    def _run_read(self, tmp_path: Path, lane: str, gh_status: int = 0, fail_first: int = 0):
+    def _run_read(
+        self,
+        tmp_path: Path,
+        lane: str,
+        gh_status: int = 0,
+        fail_first: int = 0,
+        title_status: int = 0,
+    ):
         bash = _bash()
         if bash is None:
             pytest.skip("the read block is Bash; skip where Bash is absent")
-        body_file = tmp_path / "api-reply.txt"
-        body_file.write_text("Title: t\n\nDescription:\nprose\n", encoding="utf-8")
+        # The read writes the raw `.body` to a file via redirection and builds the
+        # reviewer intent from it plus a `.title` framing read (#8925). Both reads
+        # must fail CLOSED. The `.body` read is counted / failure-injected via
+        # gh_status/fail_first; title_status fails the `.title` read on every
+        # attempt to exercise its own fail-closed guard.
+        body_reply = tmp_path / "body-reply.txt"
+        body_reply.write_text("t\n", encoding="utf-8")
         attempts = tmp_path / "gh-attempts"
         gh = tmp_path / "gh"
-        stub = f'#!/bin/sh\nprintf x >> "{attempts}"\n'
+        if title_status:
+            stub = (
+                '#!/bin/sh\ncase "$*" in\n  *.title*)\n'
+                f'    echo "gh: could not reach the API" >&2\n    exit {title_status} ;;\n'
+                "esac\n"
+            )
+        else:
+            stub = (
+                "#!/bin/sh\ncase \"$*\" in\n  *.title*)\n    printf 't\\n'\n    exit 0 ;;\nesac\n"
+            )
+        stub += f'printf x >> "{attempts}"\n'
         if gh_status:
             # Stand in for an API failure on every attempt (5xx, rate limit).
             stub += f'echo "gh: could not reach the API" >&2\nexit {gh_status}\n'
@@ -1602,10 +1624,10 @@ class TestIntentReadFailureFailsClosed:
                 '  echo "gh: HTTP 502" >&2\n'
                 "  exit 1\n"
                 "fi\n"
-                f'cat "{body_file}"\n'
+                f'cat "{body_reply}"\n'
             )
         else:
-            stub += f'cat "{body_file}"\n'
+            stub += f'cat "{body_reply}"\n'
         gh.write_text(stub, encoding="utf-8", newline="\n")
         gh.chmod(0o755)
         out_file = tmp_path / "raw-out.txt"
@@ -1663,6 +1685,16 @@ class TestIntentReadFailureFailsClosed:
         assert result.returncode == 1, result.stdout + result.stderr
         assert "This is a read failure, not a missing description" in result.stdout, result.stdout
         assert attempts.read_text(encoding="utf-8") == "xxx", "expected three attempts"
+
+    @pytest.mark.parametrize("lane", FP_LANES)
+    def test_unreadable_title_fails_closed_not_silent(self, lane: str, tmp_path: Path):
+        # The title is part of the intent the reviewer judges (#8925 review): a
+        # title read that never succeeds must FAIL the step, not proceed with an
+        # empty title and emit a verdict that never saw the intent it honoured.
+        # This pins the fail-open regression GPT flagged on first-principles:226.
+        result, _attempts, _ = self._run_read(tmp_path, lane, title_status=1)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Could not read this PR's title" in result.stdout, result.stdout
 
 
 class TestForkFirstPrinciplesContractStateIsThreeValued:
@@ -5870,3 +5902,190 @@ class TestGptRefusalTerminalState:
         # re-run the incomplete notice advises.
         assert '{ [ "$kind" = "incomplete" ] || [ "$kind" = "refused" ]; }' in comment_step
         assert "very unlikely to produce a fresh verdict" in comment_step
+
+
+# The advisory review lanes that judge the PR DESCRIPTION but have no `edited`
+# trigger: a description-derived finding they raise goes false the moment the
+# body is corrected, yet nothing re-reads it, so the in-place verdict outlives
+# the description it read (#8925). Each records a digest of the description it
+# judged so a reader/tool can tell a stale description-finding from a live one.
+# To keep that digest HONEST the description is captured ONCE per run and used
+# for BOTH the reviewer's stated-intent input AND the digest -- so a mid-run
+# description edit cannot make the model judge one body while the token records
+# another. Same-repo Design/UX use a dedicated capture step; First Principles
+# (both variants) already capture the intent once and reuse that file; the
+# Design/UX fork variants add the capture step (forks have no payload body).
+DESC_DATED_LANES = (
+    "design-review.yml",
+    "ux-review.yml",
+    "first-principles-review.yml",
+    "fork-design-review.yml",
+    "fork-ux-review.yml",
+    "fork-first-principles-review.yml",
+    "fork-gpt-review.yml",
+)
+# The step id whose `digest` output each lane wires into the verdict, and the id
+# whose file the reviewer's prompt reads -- they MUST be the same step (single
+# source). First Principles reuses its existing intent-capture step (`prefetch`),
+# fork GPT reuses its existing intent step (`intent`); the others add a `desc`
+# step.
+DESC_DIGEST_SOURCE = {
+    "design-review.yml": "desc",
+    "ux-review.yml": "desc",
+    "first-principles-review.yml": "prefetch",
+    "fork-design-review.yml": "desc",
+    "fork-ux-review.yml": "desc",
+    "fork-first-principles-review.yml": "prefetch",
+    "fork-gpt-review.yml": "intent",
+}
+# First Principles and fork GPT hand the reviewer their captured intent via a
+# data FILE the prompt names; the digest is of that same file. Design/UX name the
+# captured file to the prompt via the `<source>.outputs.file` output.
+DESC_READS_CAPTURED_FILE = {
+    "design-review.yml": "${{ steps.desc.outputs.file }}",
+    "ux-review.yml": "pr-description.txt",
+    "first-principles-review.yml": "pr-intent.txt",
+    "fork-design-review.yml": "${{ steps.desc.outputs.file }}",
+    "fork-ux-review.yml": "pr-description.txt",
+    "fork-first-principles-review.yml": "pr-intent.txt",
+    "fork-gpt-review.yml": "pr-intent.txt",
+}
+SAME_REPO_DESC_LANES = (
+    "design-review.yml",
+    "ux-review.yml",
+    "first-principles-review.yml",
+)
+
+
+class TestVerdictIsDatedAgainstTheDescriptionItRead:
+    """#8925: a lane with no `edited` trigger publishes an in-place verdict that
+    keeps naming the current head after the description is corrected under it.
+    The head is IDENTICAL across the stale and current states, so a reader who
+    dates the verdict by its head binding reads a dead objection as live. The
+    fix records a digest of the description the lane judged into the verdict
+    body, captured ONCE and shared with the reviewer's own input so the token
+    cannot name a different body than the one judged -- without comparing head
+    shas and without an `edited` trigger.
+    """
+
+    @pytest.mark.parametrize("lane", DESC_DATED_LANES)
+    def test_verdict_body_records_the_description_it_judged(self, lane: str) -> None:
+        workflow = _workflow(lane)
+        # The verdict body embeds a machine-readable token carrying a digest of
+        # the description the lane judged. Absent this, a reader has nothing but
+        # the head sha to date the verdict by -- which is exactly the wrong key.
+        assert "[REVIEWED-DESCRIPTION ${DESC_DIGEST:-}]" in workflow, lane
+
+    @pytest.mark.parametrize("lane", DESC_DATED_LANES)
+    def test_digest_is_wired_from_the_capture_step_output_not_a_second_read(
+        self, lane: str
+    ) -> None:
+        # The anti-race invariant (#8925 review): the post step must take the
+        # digest as a STEP OUTPUT from the capture step, never compute it there
+        # from a fresh read of the description. A second read is exactly what
+        # lets the token name a body the reviewer did not judge.
+        workflow = _workflow(lane)
+        source = DESC_DIGEST_SOURCE[lane]
+        assert f"DESC_DIGEST: ${{{{ steps.{source}.outputs.digest }}}}" in workflow, lane
+        # The digest is computed exactly once, in the capture step, over the
+        # captured file -- so it changes when the description changes.
+        assert "sha256sum" in workflow, lane
+        # No inline recomputation survives in a post step.
+        assert 'DESC_DIGEST="$(printf' not in workflow, lane
+        assert 'desc_body="$(gh pr view' not in workflow, lane
+
+    @pytest.mark.parametrize("lane", DESC_DATED_LANES)
+    def test_the_digest_and_the_reviewer_share_one_capture(self, lane: str) -> None:
+        # Single source: the file the reviewer is told to read IS the file the
+        # digest is taken from, so the model judges the same bytes the token
+        # names. Not the head sha, which is identical across stale/corrected.
+        workflow = _workflow(lane)
+        assert DESC_READS_CAPTURED_FILE[lane] in workflow, lane
+        assert "$HEAD" not in _line_containing(workflow, "sha256sum", "digest="), lane
+
+    @pytest.mark.parametrize("lane", DESC_DATED_LANES)
+    def test_no_lane_claims_an_unenforceable_prompt_guard(self, lane: str) -> None:
+        # A prompt telling the model not to re-fetch the description is a REQUEST,
+        # not a guarantee: a `Bash(gh pr view:*)` grant is prefix-matched and lets
+        # a redirect route around it, so the "guard" is bypassable in every lane
+        # that carries it (GPT finding on design-review.yml:258). A guard that can
+        # be bypassed is worse than none -- it tells the reader there is
+        # protection where there is none. The honest design keeps the freshness
+        # DIGEST (which makes a stale verdict detectable) and makes no
+        # prompt-guard claim. Pin that no lane re-introduces one.
+        flat = _flat(_workflow(lane))
+        assert "Do NOT re-fetch" not in flat, f"{lane}: re-introduced an unenforceable prompt guard"
+        assert "a live re-read can diverge" not in flat, lane
+        assert "read the stated intent from that file only" not in flat, lane
+
+    @pytest.mark.parametrize("lane", DESC_DATED_LANES)
+    def test_the_digest_hashes_the_raw_body_a_reader_can_reproduce(self, lane: str) -> None:
+        # The token instructs a reader to reproduce the digest as
+        # `gh pr view --json body -q .body | sha256sum | cut -c1-12`. The lane
+        # writes the raw `.body` to a FILE via REDIRECTION (`gh ... --jq '.body'
+        # > file` -- byte-exact, trailing newline preserved) and hashes that FILE.
+        # This pins the whole class of digest-corruption findings:
+        #  - a FORMATTED intent file (title prefix / media-stripped / capped) ->
+        #    a token no reader can match (540a7e63c);
+        #  - a COMMAND-SUBSTITUTED body var -> `$(...)` strips trailing newlines
+        #    (ced1e5bd6);
+        #  - a SEPARATE later read than the reviewer judged -> the token can
+        #    attest a body the model never saw (921b79cc1).
+        workflow = _workflow(lane)
+        flat = _flat(workflow)
+        digest_line = _line_containing(workflow, "sha256sum", "digest=")
+        assert (
+            'sha256sum "$desc_file"' in digest_line
+            or 'sha256sum "$body_file"' in digest_line
+            or 'sha256sum "$DESC_FILE"' in digest_line
+        ), f"{lane}: digest does not hash the body file"
+        for corrupt in ("$INTENT", "$INTENT_FILE", "$body_raw"):
+            assert corrupt not in digest_line, f"{lane}: digest hashes {corrupt}, not the body file"
+        # That body file is written by REDIRECTING gh's `.body` into it (byte
+        # exact), never `printf '%s' "$PR_BODY"` (payload, off by gh's newline)
+        # and never a command-substituted capture.
+        wrote = (
+            'gh api "repos/$REPO/pulls/$PR" --jq \'.body // ""\' > "$desc_file"' in flat
+            or 'gh api "repos/$REPO/pulls/$PR" --jq \'.body // ""\' > "$body_file"' in flat
+            or 'gh pr view "$PR" --repo "$REPO" --json body -q .body > "$body_file"' in flat
+            or 'gh pr view "$PR" --repo "$REPO" --json body -q .body > "$DESC_FILE"' in flat
+        )
+        assert wrote, f"{lane}: body file is not written byte-exact from a gh .body redirection"
+        assert 'printf \'%s\' "$PR_BODY" > "$desc_file"' not in flat, lane
+        assert 'printf \'%s\' "$desc" > "$DESC_FILE"' not in flat, lane
+
+    @pytest.mark.parametrize(
+        "lane",
+        ("fork-design-review.yml", "fork-ux-review.yml", "fork-gpt-review.yml"),
+    )
+    def test_fork_description_read_fails_closed(self, lane: str) -> None:
+        # The fork lanes read the description LIVE (no payload). A read that never
+        # succeeds must FAIL CLOSED, not publish an empty-description digest as
+        # authoritative -- an empty digest names a body no reader can match, so a
+        # valid verdict reads stale (GPT finding on fccdfd310). Pin that the
+        # capture tracks a successful read and exits nonzero when all attempts
+        # fail, with no fail-open `|| true` on the read itself.
+        workflow = _workflow(lane)
+        step = "Capture PR description (single source for review + digest)"
+        if lane == "fork-gpt-review.yml":
+            step = "Fetch PR intent (stated purpose \u2014 data only, for the scope check)"
+        script = _step_script(workflow, step)
+        assert 'read_ok=""' in script, lane
+        assert "read_ok=1" in script, lane
+        assert "exit 1" in script, lane
+        # The read itself must not be swallowed by `|| true` (that would let a
+        # total failure publish an empty digest). A `|| true` on the media-strip
+        # transform elsewhere in the step is fine; the READ is what fails closed.
+        flat = _flat(script)
+        assert '-q .body)" 2>/dev/null || true' not in flat, lane
+        assert 'body // "")\' 2>/dev/null || true)"' not in flat, lane
+
+    @pytest.mark.parametrize("lane", SAME_REPO_DESC_LANES)
+    def test_the_fix_does_not_add_an_edited_trigger(self, lane: str) -> None:
+        # A body edit must stay FREE while CI is still running (it costs a whole
+        # new head only after CI concludes). Adding `edited` to the trigger set
+        # would remove that load-bearing property and spend a model run on every
+        # typo fix. The fix must not touch the trigger set.
+        workflow = _workflow(lane)
+        assert "types: [opened, synchronize, reopened]" in workflow, lane
+        assert "edited]" not in workflow, lane
