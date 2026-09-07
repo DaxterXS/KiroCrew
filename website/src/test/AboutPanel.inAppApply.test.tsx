@@ -52,7 +52,12 @@ function stubFetch(overrides: Record<string, unknown> = {}) {
         }
       }
       return json({
-        ok: true, armed: true, request_id: 'r1', version: '9.9.9',
+        ok: true, armed: true, request_id: 'r1',
+        // The gateway arms whatever its own re-check found, which is not
+        // necessarily the version the panel offered — see the stale-verdict
+        // test below.
+        version: (overrides.armVersion as string) ?? '9.9.9',
+        version_display: (overrides.armVersionDisplay as string) ?? '9.9.9',
         expires_in: 600, approve_command: 'kirocrew update approve',
       })
     }
@@ -137,6 +142,32 @@ describe('AboutPanel in-app update (arm + approve)', () => {
       c => String(c[0]).includes('/api/update/arm') && (c[1] as { method?: string })?.method === 'POST',
     )
     expect(armPost).toBeTruthy()
+  })
+
+  it('names the version the gateway ACTUALLY armed, not the stale one the button offered', async () => {
+    // The panel's offer comes from a verdict refreshed every 12 hours, while the
+    // arm re-checks the feed so the approval installs the NEWEST build. When a
+    // newer release published in between, the two disagree — and the one that
+    // installs is the armed one, so that is the one the armed copy must name.
+    stubFetch({ armVersion: '9.9.10', armVersionDisplay: '9.9.10' })
+    store.dispatch(sseStatus({ ...ARMABLE_STATUS } as never))
+    mountWeb()
+
+    fireEvent.click(await screen.findByRole('button', { name: /update to v9\.9\.9/i }))
+
+    await screen.findByTestId('in-app-update-armed')
+    expect(screen.getByTestId('armed-version').textContent).toMatch(/9\.9\.10/)
+  })
+
+  it('omits the armed-version line for a gateway that predates the field', async () => {
+    stubFetch({ armVersionDisplay: '' })
+    store.dispatch(sseStatus({ ...ARMABLE_STATUS } as never))
+    mountWeb()
+
+    fireEvent.click(await screen.findByRole('button', { name: /update to v9\.9\.9/i }))
+
+    await screen.findByTestId('in-app-update-armed')
+    expect(screen.queryByTestId('armed-version')).toBeNull()
   })
 
   it('does not render the flow when the backend did not probe the shape', async () => {

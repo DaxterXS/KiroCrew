@@ -2279,6 +2279,16 @@ async def api_update_arm(request: web.Request) -> web.Response:
     no update-available verdict is cached — an arm must name the version the
     check reported, not whatever the feed happens to serve later (the apply
     re-verifies against the signed manifest anyway).
+
+    RE-CHECKS FIRST, because the version armed here is the version installed:
+    ``_update_info`` is refreshed by a background poll only every 12 hours, and
+    the apply refuses outright when the feed has moved past the armed version
+    (``wheel_engine._apply_locked``). Arming a half-day-old verdict therefore
+    either pins the user to a build the feed has already superseded or dead-ends
+    the whole flow — arm, host approval, refusal, start over. One request against
+    the live feed here is what makes an approval mean "install the newest". It
+    FAILS OPEN: a check that cannot reach the feed leaves the cached verdict
+    standing rather than refusing an arm that was valid a moment ago.
     """
     # Function-local: boot-path rule, same as _restart_gateway's import.
     from kiro_crew.platform import update_stepup
@@ -2300,6 +2310,34 @@ async def api_update_arm(request: web.Request) -> web.Response:
             },
             status=409,
         )
+    # AFTER the shape/policy refusals above: neither can be changed by a check,
+    # and a host that cannot apply an update at all should not pay a feed round
+    # trip to be told so.
+    #
+    # FAILS OPEN, like the desktop updater's freshness gate: a feed that cannot
+    # answer must not cost the user an arm the cached verdict already supports.
+    # A failed check replaces the cached result WHOLESALE (_set_update_info), so
+    # it blanks `update_available` — without this fallback a momentary feed
+    # hiccup would turn the button the user just clicked into "run a check
+    # first" and, because the panel gates the whole affordance on
+    # `update_available`, make the offer itself disappear until the next poll.
+    #
+    # Which is why the fallback has to RESTORE THE SNAPSHOT, not just read the old
+    # values into locals: the panel never sees this function's locals. It reads
+    # `_update_info` off the Tier-0 status frame (every 5s), so a blanked cache
+    # unmounts the whole in-app flow within one interval — and because its phase
+    # is local component state that the remount starts at `idle`, the arm we are
+    # about to return succeeds server-side while the approve command and countdown
+    # are yanked out from under the user mid-read. Restoring wholesale also keeps
+    # _set_update_info's contract intact: patching `update_available` back over a
+    # failed result would publish the exact half-truth it exists to prevent (a
+    # live verdict beside `check_status: failed` and an `error_code`).
+    cached_info = dict(_update_info)
+    await _do_update_check()
+    if _update_info.get("check_status") == CHECK_FAILED:
+        logger.info("Pre-arm update check failed; arming the cached verdict instead")
+        _update_info.clear()
+        _update_info.update(cached_info)
     available = _update_info.get("update_available")
     version = str(_update_info.get("latest_version") or "")
     channel = str(_update_info.get("channel") or "")
@@ -2315,7 +2353,20 @@ async def api_update_arm(request: web.Request) -> web.Response:
         pending = await asyncio.to_thread(update_stepup.arm, version, channel, source="dashboard")
     except update_stepup.StepUpError as exc:
         return web.json_response({"error": str(exc), "code": "arm_failed"}, status=500)
-    return web.json_response({"ok": True, **update_stepup.public_view(pending)})
+    return web.json_response(
+        {
+            "ok": True,
+            **update_stepup.public_view(pending),
+            # The re-check above can arm a NEWER version than the button the user
+            # clicked named (that label comes from a verdict up to 12 hours old),
+            # so the armed panel has to be able to say what will actually
+            # install. Display-only sibling of the raw `version` in the view,
+            # same fold and same reason as `latest_version_display`: the raw
+            # stamp of a promoted stable build reads `0.4.1rc1`, and naming a
+            # prerelease the user never chose is its own dishonesty.
+            "version_display": _display_version(pending.version, pending.channel),
+        }
+    )
 
 
 async def api_update_arm_status(request: web.Request) -> web.Response:
