@@ -48,6 +48,7 @@ from kiro_crew.knowledge.ingestion import (
     IngestionPipeline,
     _redact,
     rebuild_embeddings,
+    run_to_completion,
     start_rebuild_job,
 )
 from kiro_crew.knowledge.llm_pool import DEFAULT_EXTRACTION_EFFORT, LLMPool
@@ -1152,10 +1153,18 @@ async def _background_agent_sync(  # type: ignore[no-untyped-def]
             await pipeline.ingest_file(tmp.name, original_name=name, source_id=source_id)
         finally:
             Path(tmp.name).unlink(missing_ok=True)
-        store.db.execute(
-            "UPDATE sources SET sync_status = 'synced' WHERE id = ?", (source_id,)
-        )
-        store.db.commit()
+
+        def _mark_synced() -> None:
+            store.db.execute(
+                "UPDATE sources SET sync_status = 'synced' WHERE id = ?", (source_id,)
+            )
+            store.db.commit()
+
+        # run_to_completion, not a bare to_thread: this is the SOLE terminal
+        # status write for the sync, so a shutdown that cancelled it mid-await
+        # would leave the source stuck 'syncing' (subsequent syncs 409). Off the
+        # loop AND cancellation-draining, matching the pipeline's own idiom.
+        await run_to_completion(_mark_synced)
         logger.info("Agent sync complete: source=%s url=%s", source_id, url)
     except Exception:
         logger.exception("Agent sync failed: source=%s url=%s", source_id, url)
