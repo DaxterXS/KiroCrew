@@ -75,7 +75,7 @@ export const CHUNK_BUDGETS = {
   // the growth is main's accumulated English strings, and headroom is what was
   // actually missing. 5% headroom, matching the `all` entry's convention above,
   // so the next English string does not re-trip this for the third time.
-  t: 777 * KB, // measured 740 KB on main @ 1cd64b8c9 (~5% headroom)
+  t: 817 * KB, // measured 778 KB with the escalation-card strings (~5% headroom)
 
   // Pierre editor implementation (PR #4072 replaced Monaco, whose
   // 'editor.api2' chunk this entry set used to carry) -- the code-editor
