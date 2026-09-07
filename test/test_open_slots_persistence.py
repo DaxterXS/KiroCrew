@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -960,18 +961,21 @@ def test_suspend_slots_push_no_push_means_no_broadcast(tmp_path, monkeypatch):
     assert seen.count("slots") == 0
 
 
-# ── #8745: a serialization failure in the slots flush must name its offender ──
+# ── #8745: a failing slots broadcast must not fail the write it announces ──
 #
 # The evidenced failure class behind a slots-broadcast 500 is a non-serializable
 # value in slot state: json.dumps raises deep in the flush, every slots read
 # path is equally broken, and the stock TypeError names neither the slot nor
-# the field. Worse, when the flush fails while a suspend block is unwinding
-# over the body's own exception, the flush's exception REPLACES the body's in
-# the caller's view (the original demoted to __context__) — exactly how #6522
-# was first misread as a broadcast bug. These pin the two diagnostics: the
-# offender note on BOTH coalescing branches, and the unwinding-over note.
-# Semantics stay untouched: same exception types, same propagation, same
-# chaining, no caught-and-swallowed anything.
+# the field. #8888 added the diagnostics (an offender note on every path, plus
+# an unwinding-over note) and deliberately left the SEMANTICS alone, because
+# what the caller should be told was an unowned decision.
+#
+# That decision is made here: the broadcast is contained. It runs AFTER the
+# state change it announces has committed, so it must not be able to fail it.
+# Both coalescing branches funnel through _do_slots_broadcast, so both now
+# answer the same way and no timer decides the outcome. The offender note is
+# not lost -- it rides the exception into the log line. The READ paths keep
+# failing loud on purpose: a read path's answer IS the projection.
 
 
 def _poison_slots_projection(state):
@@ -980,82 +984,148 @@ def _poison_slots_projection(state):
     state.serialize_slots = lambda **kw: [dict(entry)]  # type: ignore[method-assign]
 
 
-def test_leading_edge_serialization_failure_names_the_offender(tmp_path, monkeypatch):
-    """The immediate (leading-edge) broadcast annotates the raising TypeError."""
+def test_leading_edge_serialization_failure_is_contained_and_logged(tmp_path, monkeypatch, caplog):
+    """The immediate (leading-edge) broadcast logs the offender instead of raising."""
     monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
     state = _make_state(tmp_path / "sessions")
     _poison_slots_projection(state)
 
-    with pytest.raises(TypeError) as excinfo:
-        state.push_slots_update()
+    with caplog.at_level(logging.ERROR, logger="kiro_crew.dashboard.state"):
+        state.push_slots_update()  # must not raise: the write already committed
 
-    notes = "\n".join(getattr(excinfo.value, "__notes__", []))
-    assert "'chat-poison'" in notes, f"note must name the slot key, got: {notes!r}"
+    assert state._slots_broadcast_drops == 1, "the drop must be counted, not absorbed"
+    record = next(r for r in caplog.records if "slots broadcast dropped" in r.getMessage())
+    assert record.exc_info is not None, "a dropped broadcast must log its traceback"
+    notes = "\n".join(getattr(record.exc_info[1], "__notes__", []))
+    assert "'chat-poison'" in notes, f"the offender note must survive containment, got: {notes!r}"
     assert "'title'" in notes, "note must name the offending field"
     assert "object" in notes, "note must name the value's type"
     assert "value withheld" in notes, "note must never carry the value itself"
 
 
-def test_trailing_flush_serialization_failure_names_the_offender(tmp_path, monkeypatch):
-    """The trailing-edge callback funnels through the same annotated dump.
+def test_trailing_flush_serialization_failure_is_contained(tmp_path, monkeypatch):
+    """The trailing-edge callback funnels through the same contained broadcast.
 
-    Both timing branches converge on _do_slots_broadcast, so the diagnostic
-    covers them by construction — this pins the trailing half of that claim.
+    Both timing branches converge on _do_slots_broadcast, so containment covers
+    them by construction -- this pins the trailing half of that claim. Before
+    this fix the leading edge 500ed the caller while the trailing edge only
+    logged, so a 0.2s timer decided what the caller was told.
     """
     monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
     state = _make_state(tmp_path / "sessions")
     _poison_slots_projection(state)
 
-    with pytest.raises(TypeError) as excinfo:
+    state._trailing_slots_flush()  # must not raise
+
+    assert state._slots_broadcast_drops == 1
+
+
+def test_repeated_drops_are_all_counted_and_the_log_is_throttled(tmp_path, monkeypatch, caplog):
+    """A recurring fault must not bury its own first traceback under copies.
+
+    The poison is a property of slot state, so it recurs on every push. Every
+    drop counts; only the repeats inside the window are quiet.
+    """
+    monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
+    state = _make_state(tmp_path / "sessions")
+    _poison_slots_projection(state)
+
+    with caplog.at_level(logging.ERROR, logger="kiro_crew.dashboard.state"):
+        for _ in range(5):
+            state._trailing_slots_flush()
+
+    assert state._slots_broadcast_drops == 5, "every drop must be counted"
+    logged = [r for r in caplog.records if "slots broadcast dropped" in r.getMessage()]
+    assert len(logged) == 1, f"repeats must be throttled, got {len(logged)} lines"
+    assert "1 dropped since start" in logged[0].getMessage()
+
+
+def test_drop_log_resumes_after_the_throttle_window(tmp_path, monkeypatch, caplog):
+    """Throttling is a window, not a mute: a later drop logs with the running count."""
+    monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
+    state = _make_state(tmp_path / "sessions")
+    _poison_slots_projection(state)
+
+    with caplog.at_level(logging.ERROR, logger="kiro_crew.dashboard.state"):
+        state._trailing_slots_flush()
+        # Backdate well past any sane window rather than importing its value, so
+        # this test pins the resume behaviour and not the constant.
+        state._slots_broadcast_drop_logged = time.monotonic() - 100_000.0
         state._trailing_slots_flush()
 
-    notes = "\n".join(getattr(excinfo.value, "__notes__", []))
-    assert "'chat-poison'" in notes
-    assert "'title'" in notes
+    logged = [r for r in caplog.records if "slots broadcast dropped" in r.getMessage()]
+    assert len(logged) == 2
+    assert "2 dropped since start" in logged[1].getMessage()
 
 
-def test_flush_failure_during_unwind_names_the_masked_exception(tmp_path, monkeypatch):
-    """A flush failing during exception unwind must say whose funeral it crashed.
+def test_broadcast_drop_survives_a_partially_constructed_state():
+    """The failure handler must work on a __new__-built state (no __init__).
 
-    The body's RuntimeError is the actual fault; the flush's TypeError merely
-    reports a broken projection. Today's chaining (body as __context__) is
-    preserved and now NAMED, so the top of the traceback stops eating the lede.
+    Several endpoint suites build their fixture that way. The drop counter is a
+    class-level default for exactly this reason: an AttributeError inside the
+    handler would re-raise the 500 the containment exists to prevent, and it
+    would do so only in those suites.
+    """
+    bare = DashboardState.__new__(DashboardState)
+    # The same minimal seeding test_push_slots_update_survives_a_partially_
+    # constructed_state uses, so the ONLY fault is the poisoned projection.
+    bare._slots = {}
+    bare._ws_clients = []
+    bare._sse_queues = []
+    bare._notify_event = MagicMock()
+    bare.channel_manager = None
+    assert bare._slots_broadcast_drops == 0, "counter must read at baseline without __init__"
+    _poison_slots_projection(bare)
+
+    bare.push_slots_update()  # must not raise
+
+    assert bare._slots_broadcast_drops == 1
+
+
+def test_flush_failure_no_longer_masks_the_body_exception(tmp_path, monkeypatch):
+    """The body's own fault is what the caller sees, not the messenger's.
+
+    This is the masking half of #8745. The body's RuntimeError is the actual
+    fault; the flush's TypeError merely reported a broken projection, and
+    @contextmanager propagated the flush's exception with the body's demoted to
+    __context__ -- which is how #6522 was misread as a broadcast bug. With the
+    broadcast contained the flush no longer raises, so the original propagates
+    as itself and there is nothing left to mask.
     """
     monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
     state = _make_state(tmp_path / "sessions")
     _poison_slots_projection(state)
 
-    with pytest.raises(TypeError) as excinfo:
+    with pytest.raises(RuntimeError) as excinfo:
         with state.suspend_slots_push():
             state.push_slots_update()  # queue the owed push
             raise RuntimeError("boom")  # the body's actual fault
 
-    exc = excinfo.value
-    assert isinstance(exc.__context__, RuntimeError), "implicit chaining must survive"
-    notes = "\n".join(getattr(exc, "__notes__", []))
-    assert "unwinding over" in notes and "RuntimeError" in notes
-    assert "__context__" in notes, "note must point at where the original went"
-    assert "'chat-poison'" in notes, "offender note must also be present"
+    assert type(excinfo.value) is RuntimeError, "the body's fault must not be replaced"
     assert state._slots_push_suspend == 0, "depth must still unwind"
+    assert state._slots_broadcast_drops == 1, "the owed flush still ran, and still counted"
 
 
-def test_flush_failure_without_inflight_exception_has_no_unwind_note(tmp_path, monkeypatch):
-    """A plain flush failure (body exited normally) gets the offender note only."""
+def test_committed_write_is_not_failed_by_its_own_flush(tmp_path, monkeypatch):
+    """A suspend block whose owed flush fails must still exit normally.
+
+    This is the create path's shape in miniature: the write commits inside the
+    block, __exit__ flushes the owed push, and the flush is the only thing that
+    used to turn a committed write into an exception for its caller.
+    """
     monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
     state = _make_state(tmp_path / "sessions")
     _poison_slots_projection(state)
 
-    with pytest.raises(TypeError) as excinfo:
-        with state.suspend_slots_push():
-            state.push_slots_update()  # owed flush raises on a clean exit
+    with state.suspend_slots_push():
+        state.push_slots_update()  # owed flush will fail on a clean exit
 
-    notes = "\n".join(getattr(excinfo.value, "__notes__", []))
-    assert "'chat-poison'" in notes
-    assert "unwinding over" not in notes, "no body exception, so no unwind note"
+    assert state._slots_push_suspend == 0
+    assert state._slots_broadcast_drops == 1
 
 
-def test_healthy_flush_is_unchanged_by_the_diagnostics(tmp_path, monkeypatch):
-    """Benign control: the hoisted dump changes nothing on the happy path."""
+def test_healthy_flush_is_unchanged_by_the_containment(tmp_path, monkeypatch):
+    """Benign control: a healthy broadcast still fires exactly once, and counts no drop."""
     monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
     state = _make_state(tmp_path / "sessions")
     seen: list[str] = []
@@ -1064,6 +1134,7 @@ def test_healthy_flush_is_unchanged_by_the_diagnostics(tmp_path, monkeypatch):
     state.push_slots_update()
 
     assert seen.count("slots") == 1
+    assert getattr(state, "_slots_broadcast_drops", 0) == 0
 
 
 # ── #8745 follow-up: the REMAINING slots read paths carry the same offender note ──

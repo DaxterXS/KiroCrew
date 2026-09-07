@@ -333,7 +333,7 @@ def _slots_ws_frame(
 
     ONE builder for the two sites that send this frame — the generic fan-out in
     :meth:`DashboardState._broadcast` and the owner frame in
-    :meth:`DashboardState._do_slots_broadcast` — because they must carry the SAME
+    :meth:`DashboardState._send_slots_frames` — because they must carry the SAME
     keys and nothing else enforces that. ``_send_ws_all`` skips owner sockets for
     ``slots``, so the generic frame no longer backstops an owner: a key present in
     one envelope and not the other silently deprives every owner window, with no
@@ -445,6 +445,14 @@ def _delivery_key(content: str) -> str:
 # Slot-list broadcast coalescing window. The sub-agent slots debouncer in
 # slack/gateway.py hardcodes the same value independently; the two are not shared.
 _SLOTS_BROADCAST_INTERVAL_S: float = 0.2
+
+# How often a DROPPED slots broadcast may log its full traceback. The drop is
+# contained (see _do_slots_broadcast), and the fault that causes it is a property
+# of slot state, not of one push: it therefore recurs on EVERY later broadcast,
+# and a slot mutation fires several per turn. Logging each one buries the first
+# traceback under thousands of copies. First drop always logs; after that one
+# per window, carrying the running count so nothing is silently absorbed.
+_SLOTS_BROADCAST_DROP_LOG_INTERVAL_S: float = 60.0
 
 
 def native_subagent_output_tail(chunks: list[str], limit: int = NATIVE_SUBAGENT_OUTPUT_TAIL) -> str:
@@ -4862,6 +4870,13 @@ class DashboardState:
     _slots_broadcast_lock: "threading.Lock | None" = None
     _slots_broadcast_timer: "asyncio.TimerHandle | None" = None
     _slots_broadcast_last: float = 0.0
+    # Dropped-broadcast bookkeeping, on that same read path and for the same
+    # reason: _do_slots_broadcast reads both while HANDLING a failure, so an
+    # __init__-only attribute would raise AttributeError there and re-raise the
+    # very exception the containment exists to absorb. Counts drops for the whole
+    # process lifetime; the timestamp throttles the repeat log, not the count.
+    _slots_broadcast_drops: int = 0
+    _slots_broadcast_drop_logged: float = 0.0
     # The one loop this dashboard is served on. Every surface that hands work in
     # from a foreign thread -- the coalesced slots broadcast, an off-loop
     # websocket send, the log handler's fan-out -- resolves it through
@@ -7674,6 +7689,14 @@ class DashboardState:
         exception (`PEP 678`) so the buried original stays visible — the flush's
         exception otherwise replaces the body's in the caller's view, demoting
         the actual fault to ``__context__`` (how #6522 was first misread).
+
+        The EVIDENCED way to reach that annotation is gone: a failing broadcast
+        is now contained in ``_do_slots_broadcast`` and logged, so the flush no
+        longer raises over the body's exception and the body's fault propagates
+        as itself (#8745). What remains is the narrow rest of
+        ``push_slots_update`` — a lock or timer-scheduling fault — which is why
+        the annotation stays rather than being deleted with the case that
+        motivated it.
         """
         self._slots_push_suspend += 1
         try:
@@ -7814,7 +7837,74 @@ class DashboardState:
         self._do_slots_broadcast()
 
     def _do_slots_broadcast(self) -> None:
-        """Serialize and broadcast the slot list. Bypasses coalescing."""
+        """Announce the slot list. A failure here is logged, never raised.
+
+        This is the ONE funnel both coalescing branches reach — the leading-edge
+        call in ``push_slots_update`` and the trailing timer's
+        ``_trailing_slots_flush`` — so containing the failure here makes both
+        branches answer identically by construction. That convergence is the
+        point (#8745): before this, a broken slots projection surfaced as a 500
+        on the leading edge and as a log line inside the 0.2s window, so a timer
+        decided whether the caller was told, and the 500 landed on the idle
+        dashboard doing one deliberate new-chat.
+
+        WHY CONTAINING IT IS CORRECT. A broadcast is work that happens AFTER the
+        state change it announces has already committed. ``api_chat_slot_create``
+        is the evidenced caller: the slot is in ``_slots`` and its metadata is
+        persisted before ``suspend_slots_push.__exit__`` flushes the owed push,
+        so an exception escaping that flush turned a create that HAPPENED into a
+        500 the caller reads as "it did not". The user retries and gets a second
+        slot. A listener being absent, slow or broken says nothing about whether
+        the write landed, so it must not be able to fail the write.
+
+        The evidenced fault is a non-serializable value in slot state (#6522,
+        #8745), and this broadcast serializes EVERY slot: one poisoned slot
+        therefore failed an unrelated healthy create. That is a fault in the
+        messenger being charged to the write.
+
+        WHAT THIS DELIBERATELY DOES NOT COVER. The slots READ paths — ``GET
+        /api/chat/slots``, the WS connect snapshot, ``_slots_ws_frame`` — keep
+        failing loud, and that is not an oversight. A read path's answer IS the
+        projection, so a caller asking for it must be told it is unrenderable.
+        This path's answer is "something changed"; the change is already true
+        whether or not anyone hears it. Same fault, opposite obligation.
+
+        LOUD, NOT SILENT. Every drop increments ``_slots_broadcast_drops`` and
+        the first one logs the full traceback, which carries the offender note
+        naming the slot, field and type (see ``_slots_serialization_note``). Only
+        the REPEATS are throttled, and each surviving line carries the running
+        count. A client repairs a dropped frame on its next read; nothing repairs
+        a wrong 500.
+        """
+        try:
+            self._send_slots_frames()
+        except Exception:
+            # Both reads resolve through class-level defaults (see the block at
+            # the top of DashboardState), because this handler runs on a
+            # __new__-built state too. An __init__-only counter would raise
+            # AttributeError here and re-raise the 500 this exists to absorb.
+            drops = self._slots_broadcast_drops + 1
+            self._slots_broadcast_drops = drops
+            now = time.monotonic()
+            if (
+                drops == 1
+                or now - self._slots_broadcast_drop_logged >= _SLOTS_BROADCAST_DROP_LOG_INTERVAL_S
+            ):
+                self._slots_broadcast_drop_logged = now
+                logger.exception(
+                    "slots broadcast dropped; the state change it announces is "
+                    "already committed and every slots read path is equally "
+                    "broken (%d dropped since start)",
+                    drops,
+                )
+
+    def _send_slots_frames(self) -> None:
+        """Serialize and broadcast the slot list. Bypasses coalescing.
+
+        Called only by :meth:`_do_slots_broadcast`, which owns the contract that
+        a failure here never reaches the caller. Raising is how this reports a
+        fault: the guard logs it with the offender note attached.
+        """
         from kiro_crew.dashboard.handlers.source_providers import (
             gitlab_hosts_generation,
         )
@@ -7845,7 +7935,8 @@ class DashboardState:
         # the failure with the offender so one traceback is enough to find it.
         # Both coalescing branches (leading edge and trailing timer) funnel
         # through this method, so both report identically by construction.
-        # Diagnosis only: the exception still propagates unchanged.
+        # The note rides the exception up to ``_do_slots_broadcast``, which logs
+        # it instead of failing the committed write that asked for this push.
         try:
             slots_json = json.dumps(slots_data)
         except (TypeError, ValueError) as exc:
@@ -8044,7 +8135,7 @@ class DashboardState:
                     "channelTrusted": note.get("channelTrusted", False),
                 }
                 # Built by `_slots_ws_frame`, NOT inline: the owner frame in
-                # `_do_slots_broadcast` has to carry an identical key set, and it
+                # `_send_slots_frames` has to carry an identical key set, and it
                 # cannot if each site names its own keys. See that function.
                 ws_msg = _slots_ws_frame(
                     slots_list,

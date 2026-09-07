@@ -163,7 +163,10 @@ class TestSlotsBroadcastCarriesFolders:
         ws = self._DashboardWS()
         state.register_ws(ws)  # type: ignore[arg-type]
 
-        state._do_slots_broadcast()  # must not raise
+        # The frame assertion below is the pin: a broadcast failure is contained
+        # in _do_slots_broadcast (#8745), so send_str would simply never be
+        # called and call_args would be None.
+        state._do_slots_broadcast()
 
         frame = json.loads(ws.send_str.call_args[0][0])
         assert frame["folders"] == [{"id": "ok", "name": "Keep", "order": 0}]
@@ -178,7 +181,10 @@ class TestSlotsBroadcastCarriesFolders:
         ws = self._DashboardWS()
         state.register_ws(ws)  # type: ignore[arg-type]
 
-        state._do_slots_broadcast()  # must not raise
+        # The frame assertion below is the pin: a broadcast failure is contained
+        # in _do_slots_broadcast (#8745), so send_str would simply never be
+        # called and call_args would be None.
+        state._do_slots_broadcast()
 
         frame = json.loads(ws.send_str.call_args[0][0])
         assert frame["folders"] == []
