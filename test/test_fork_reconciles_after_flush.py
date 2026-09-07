@@ -1227,3 +1227,73 @@ async def test_a_save_completing_mid_read_does_not_fork_a_superseded_variant(tmp
     assert (
         "v3-NEW" in visible
     ), f"the forked session lost the current variant 'v3-NEW' entirely: {visible}"
+
+
+@pytest.mark.asyncio
+async def test_a_pending_rewrite_flush_refuses_when_the_source_slot_is_replaced(
+    tmp_path, monkeypatch
+):
+    """The fork's rewrite=True source flush must not truncate a replacement (#8988).
+
+    ``chat_fork`` flushes a source slot's pending rewind with
+    ``save_slot_off_loop(rewrite=True)`` before copying. That save runs on a
+    worker thread and takes the transcript's patient lock. If a same-name
+    close-and-recreate replaces the source slot object while the save waits, the
+    truncating rewrite would land on the REPLACEMENT's transcript with no
+    archive -- the same class as the rewind/edit-resend boundary. The
+    ``expected_slot`` guard threaded into this call refuses the save (returns
+    ``False``, nothing written), and the fork aborts rather than snapshotting a
+    source that is no longer the one requested.
+    """
+    from kiro_crew.dashboard.chat_persistence import _save_slot_to_history as _real_save_to_history
+    from kiro_crew.dashboard.chat_persistence import save_slot_off_loop as _real_save_off_loop
+
+    monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+    state = _make_state(tmp_path)
+    log = state.conversation_log
+    key = "dashboard:rewindforkrepl"
+
+    for i in range(6):
+        log.append(key, "user" if i % 2 == 0 else "assistant", f"m{i}")
+
+    slot = state.get_or_create_slot("rewindforkrepl")
+    for i in range(6):
+        slot.append("user" if i % 2 == 0 else "assistant", f"m{i}", "msg")
+    slot.drain()
+    slot._disk_window_len = 2
+    slot._disk_older_count = 0
+    # Exactly what chat_rewind leaves behind: a truncated window owing a rewrite.
+    del slot.messages[3:]
+    slot._dirty = True
+    slot._resumed_count = 0
+    slot._pending_rewrite = True
+
+    captured = {}
+
+    async def _replacing_save(st, target, *args, **kwargs):
+        # A same-name close-and-recreate lands while the flush is in flight.
+        repl = type(target)("rewindforkrepl")
+        repl.append("user", "REPLACEMENT keep me", "msg", ts="2026-05-21T17:00:00Z")
+        repl.append("assistant", "replacement reply", "msg", ts="2026-05-21T17:00:01Z")
+        repl.drain()
+        st._slots["rewindforkrepl"] = repl
+        _real_save_to_history(st, repl, force=True)
+        captured["expected_slot"] = kwargs.get("expected_slot")
+        captured["rewrite"] = kwargs.get("rewrite")
+        return await _real_save_off_loop(st, target, *args, **kwargs)
+
+    monkeypatch.setattr("kiro_crew.dashboard.chat_fork.save_slot_off_loop", _replacing_save)
+
+    async with TestClient(TestServer(_make_app(state))) as client:
+        resp = await client.post("/api/chat/slots/rewindforkrepl/fork", json={})
+        body = await resp.json()
+
+    # The guard was threaded (rewrite=True + expected_slot=the source object)...
+    assert captured.get("rewrite") is True
+    assert captured.get("expected_slot") is slot
+    # ...the save refused, so the fork aborts rather than copying a stale source.
+    assert resp.status == 409, f"expected abort, got {resp.status}: {body}"
+    assert body["code"] == "fork_source_deleted"
+    # The replacement's transcript on disk was NOT truncated by the stale rewrite.
+    persisted = [m["content"] for m in log.read_messages(key)]
+    assert "REPLACEMENT keep me" in persisted

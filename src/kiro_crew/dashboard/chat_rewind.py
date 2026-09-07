@@ -498,6 +498,7 @@ async def api_chat_slot_rewind(request: web.Request) -> web.Response:
                     slot,
                     msgs_snapshot,
                     expected_history_key=expected_history_key,
+                    expected_slot=slot,
                     expected_disk_older_count=pre_await_disk_older_count,
                 )
             )
@@ -530,12 +531,13 @@ async def api_chat_slot_rewind(request: web.Request) -> web.Response:
                 )
             if not saved:
                 # The save's own guards refused the write (the session was
-                # permanently deleted, or the slot was rebound to another
-                # transcript, while the write awaited its lock). Nothing was
+                # permanently deleted, the slot was rebound to another
+                # transcript, or a same-name close-and-recreate replaced the slot
+                # object, while the write awaited its lock). Nothing was
                 # persisted, so reporting success here would dispatch a turn
                 # from state that exists only in memory.
                 logger.warning(
-                    "rewind: history save refused for %s (concurrent delete or rebind)",
+                    "rewind: history save refused for %s (concurrent delete, rebind or replace)",
                     slot.key,
                 )
                 state.push_slots_update()

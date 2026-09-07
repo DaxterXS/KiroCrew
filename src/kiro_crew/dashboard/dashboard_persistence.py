@@ -17,7 +17,7 @@ from typing import Any
 
 AtomicWriter = Callable[..., None]
 JsonCodecProvider = Callable[[], Any]
-SlotSaver = Callable[[Any, Any], Any]
+SlotSaver = Callable[..., Any]
 
 
 def _current_shutdown_event() -> Any:
@@ -105,12 +105,54 @@ class DashboardPersistenceCoordinator:
         # erasing a new dirty mark set concurrently by the event loop.
         generation = slot._dirty_gen
         try:
-            save_slot_to_history(owner, slot)
+            # ``expected_slot=slot`` closes the same await-gap the boundary paths
+            # carry, one level up: this periodic writer captures ``slot`` in the
+            # ``_flush_dirty_slots`` loop and then AWAITS the transcript lock, so
+            # from the executor thread it holds a reference to the old object
+            # while the event loop can already have swapped ``state._slots[key]``
+            # for a same-name close-and-recreate. A slot left in
+            # ``_pending_rewrite`` (rewind / regenerate, or a failed inline
+            # rewrite) forces the destructive rewrite branch here, so without the
+            # guard this flush would truncate the REPLACEMENT's transcript with no
+            # archive. The guard refuses (writes nothing) when the live slot under
+            # this key is no longer this object; for the overwhelmingly common
+            # case where it is unchanged the check is a GIL-atomic dict read that
+            # passes, so a normal flush is unaffected.
+            persisted = save_slot_to_history(owner, slot, expected_slot=slot)
         except Exception:
             # A failed write remains owed to the next periodic pass.
             self._logger_provider().warning("Flush failed for slot %s", slot.key, exc_info=True)
         else:
-            if slot._dirty_gen == generation:
+            # Clear the dirty bit when the write either LANDED or is never worth
+            # retrying again. The save returns ``False`` without writing on three
+            # distinct refusals, and they split by whether this slot is still the
+            # live ``state._slots`` entry -- i.e. whether the periodic loop, which
+            # iterates ``state._slots.values()``, will hand this same object back:
+            #
+            #   * ``expected_slot`` mismatch (pre-lock or in-lock): the object was
+            #     REPLACED, so it is no longer ``state._slots[key]`` and the loop
+            #     never revisits it. Keeping ``_dirty`` set is harmless (nothing
+            #     re-flushes it) and is what lets a close arm's RESTORED slot --
+            #     which is the current entry again, so its own flush writes and
+            #     clears via ``persisted`` -- be retried rather than dropped.
+            #   * delete-won: the session was permanently deleted while the save
+            #     awaited the lock. This fires for a slot that is STILL
+            #     ``state._slots[key]`` (a cron-linked tab the delete's cleanup
+            #     could not pop), so the loop WOULD hand it back every 5s forever.
+            #     There is nothing left to persist -- the session is gone -- so the
+            #     retry is doomed, not deferred: clear the bit.
+            #
+            # ``persisted or is_current`` captures both: clear on a written save,
+            # and clear a refusal whose slot is still current (delete-won, doomed),
+            # while a refusal whose slot was replaced keeps the bit (moot for the
+            # dead object, load-bearing for the restored one). A single boolean
+            # return had hidden that "retry me" vs "never again" distinction; the
+            # ``is`` check on the live entry is what recovers it. GIL-atomic dict
+            # read + pointer compare, safe from this executor thread. The
+            # generation comparison still guards a new dirty mark set concurrently
+            # by the event loop.
+            is_current = owner._slots.get(slot.key) is slot
+            if (persisted or is_current) and slot._dirty_gen == generation:
                 slot._dirty = False
 
     def _flush_dirty_slots(self, owner: Any) -> None:

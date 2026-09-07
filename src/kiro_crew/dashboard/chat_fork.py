@@ -316,7 +316,7 @@ async def api_chat_slot_fork(request: web.Request) -> web.Response:
                         # before`` pins that). Stating it here removes the dependence
                         # on that promotion, which is the thing that silently failed.
                         saved = await save_slot_off_loop(
-                            state, slot, rewrite=True, best_effort=False
+                            state, slot, rewrite=True, expected_slot=slot, best_effort=False
                         )
                     except Exception:
                         logger.warning(
@@ -334,14 +334,18 @@ async def api_chat_slot_fork(request: web.Request) -> web.Response:
                             status=503,
                         )
                     if not saved:
-                        # Delete-won: the source session was permanently deleted
-                        # while this flush awaited the lock. Do not fork — the
-                        # copy would republish the destroyed conversation under
-                        # a fresh key (see the identical check at the plain
-                        # flush site below).
+                        # Delete-won OR slot-replaced: the source session was
+                        # permanently deleted, or a same-name close-and-recreate
+                        # replaced the source slot object, while this flush awaited
+                        # the lock (the ``expected_slot`` guard refuses the
+                        # rewrite so it cannot truncate a replacement's transcript
+                        # with no archive). Do not fork -- the copy would
+                        # republish a destroyed conversation, or snapshot a source
+                        # that is no longer the one requested (see the identical
+                        # check at the plain flush site below).
                         logger.warning(
-                            "chat_fork: source slot=%s was permanently deleted "
-                            "during the pending-rewrite flush; aborting fork",
+                            "chat_fork: source slot=%s was permanently deleted or "
+                            "replaced during the pending-rewrite flush; aborting fork",
                             slot.key,
                         )
                         return web.json_response(

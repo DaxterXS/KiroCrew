@@ -2582,6 +2582,7 @@ def _save_slot_to_history(
     rewrite: bool = False,
     expected_history_key: str | None = None,
     expected_disk_older_count: int | None = None,
+    expected_slot: "_ChatSlot | None" = None,
     rows_only: bool = False,
 ) -> bool:
     """Persist slot messages to JSONL history (append-safe).
@@ -2656,10 +2657,32 @@ def _save_slot_to_history(
 
     Returns ``False`` when the delete-won guard aborted the save because the
     session was permanently deleted while this save awaited the lock, when
-    ``expected_history_key`` no longer matches the slot's routing, or when
-    ``expected_disk_older_count`` drifted — the in-memory window was NOT
-    persisted and must not be treated as durable. Every other completion
-    (including the benign no-op skips) returns ``True``.
+    ``expected_history_key`` no longer matches the slot's routing, when
+    ``expected_disk_older_count`` drifted, or when ``expected_slot`` no longer
+    owns the slot's name — the in-memory window was NOT persisted and must not
+    be treated as durable. Every other completion (including the benign no-op
+    skips) returns ``True``.
+
+    ``expected_slot`` refuses the save when the slot OBJECT the caller
+    authorized is no longer the one registered under its name. A same-name
+    close-and-recreate produces a DIFFERENT ``_ChatSlot`` object that keeps the
+    same ``slot_history_key``, so ``expected_history_key`` waves it through and
+    the destructive rewrite lands on the REPLACEMENT conversation's transcript.
+    A rewrite has no archive for those overwritten rows (``_archive_dropped_lines``
+    archives the OLD slot's dropped tail, not the replacement's), so the loss is
+    unrecoverable. ``state._slots.get`` is a GIL-atomic dict read and object
+    identity is a pointer compare, both safe from this executor thread, so the
+    check joins the same pre-write refusal set as the two guards above rather
+    than taking ``slot._lock`` (an ``asyncio.Lock`` this thread cannot acquire).
+    It is checked TWICE: once at the pre-lock snapshot as a cheap early-out, and
+    once more inside ``_locked(history_key)`` immediately before the write. The
+    in-lock recheck is the authoritative one -- the patient lock acquire is
+    itself an await, so a same-name close-and-recreate can commit its own
+    transcript while this save waits for the lock, and the in-lock delete-won
+    guard cannot see it (a recreate that resumes the same transcript preserves
+    ``created_at``). Object identity is the only axis that distinguishes the two
+    conversations sharing this transcript, so it is re-read under the lock where
+    no further swap can slip between the check and the write.
     """
     if not state.conversation_log:
         return True
@@ -2738,6 +2761,24 @@ def _save_slot_to_history(
             slot.key,
             expected_history_key,
             history_key,
+        )
+        return False
+    if expected_slot is not None and state._slots.get(slot.key) is not expected_slot:
+        # Cheap pre-lock early-out for the object-identity guard: when the swap
+        # is already visible at the snapshot, refuse now and skip the patient
+        # lock acquire entirely. This is NOT the authoritative check -- the swap
+        # can still land while this save waits for the lock -- so the guard is
+        # re-read inside ``_locked(history_key)`` immediately before the write
+        # (see below). The replacement keeps the same ``slot_history_key``, so
+        # the ``expected_history_key`` guard above cannot see the swap; object
+        # identity is the only axis that distinguishes the two conversations
+        # sharing one transcript file. Refuse like the guards above: return False
+        # with nothing written, and let the caller roll back and re-decide.
+        # ``state._slots.get`` is a GIL-atomic dict read and ``is`` is a pointer
+        # compare, both safe from this executor thread.
+        logger.warning(
+            "Slot %s save refused: slot object was replaced during the write",
+            slot.key,
         )
         return False
     kept = [m for m in window if not _note_authorized_elsewhere(m.get("meta"), note_auth_key)]
@@ -3095,6 +3136,27 @@ def _save_slot_to_history(
                 logger.warning(
                     "Skipping history save for %s (slot=%s): the session was "
                     "permanently deleted while this save awaited the lock",
+                    history_key,
+                    slot.key,
+                )
+                return False
+            if expected_slot is not None and state._slots.get(slot.key) is not expected_slot:
+                # In-lock recheck of the object-identity guard. The pre-lock
+                # check above is only a cheap early-out: the patient lock
+                # acquire is itself an await, so a same-name close-and-recreate
+                # can commit its own transcript AHEAD of this save while it waits
+                # for the lock, and the in-lock delete-won guard cannot catch it
+                # -- a recreate that resumes the same transcript preserves
+                # ``created_at``, so the identity comparison above reads
+                # unchanged. Object identity is the only axis that distinguishes
+                # the two conversations sharing this transcript, so it must be
+                # re-read HERE, inside the lock and before the write, or a stale
+                # rewrite silently overwrites the replacement's history with no
+                # archive. Refuse like the guards above: nothing written, False,
+                # and the caller re-decides.
+                logger.warning(
+                    "Skipping history save for %s (slot=%s): the slot object was "
+                    "replaced while this save awaited the lock",
                     history_key,
                     slot.key,
                 )
@@ -3691,6 +3753,7 @@ async def save_slot_off_loop(
     rewrite: bool = False,
     best_effort: bool = True,
     expected_history_key: str | None = None,
+    expected_slot: "_ChatSlot | None" = None,
     rows_only: bool = False,
 ) -> bool:
     """Persist a slot from the event loop without blocking or dropping the save.
@@ -3734,8 +3797,10 @@ async def save_slot_off_loop(
 
     Returns ``False`` only when the save was skipped WITHOUT writing: the
     session was permanently deleted while the save awaited the lock (the
-    delete-won guard in :func:`_save_slot_to_history`), or the routing moved
-    off ``expected_history_key``. Neither skip raises, for either
+    delete-won guard in :func:`_save_slot_to_history`), the routing moved
+    off ``expected_history_key``, or ``expected_slot`` no longer owns the
+    slot's name (a same-name close-and-recreate replaced the object). Neither
+    skip raises, for either
     ``best_effort`` mode, so a clean return NO LONGER proves a committed write.
     Callers that go on to republish the slot's content elsewhere (fork, the
     transfer export) must check the return; archival callers (close/cleanup)
@@ -3752,6 +3817,7 @@ async def save_slot_off_loop(
             force=force,
             rewrite=rewrite,
             expected_history_key=expected_history_key,
+            expected_slot=expected_slot,
             rows_only=rows_only,
         )
 

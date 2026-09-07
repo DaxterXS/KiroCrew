@@ -301,7 +301,13 @@ class TestRewindSlot:
         state.sessions._session_map.get = MagicMock(return_value="")
 
         def _save_stamps_witnesses(
-            _state, saved_slot, msgs, *, expected_history_key, expected_disk_older_count
+            _state,
+            saved_slot,
+            msgs,
+            *,
+            expected_history_key,
+            expected_slot,
+            expected_disk_older_count,
         ):
             # Emulate the real save's post-write bookkeeping on the live slot.
             saved_slot._pending_rewrite = False
@@ -358,7 +364,13 @@ class TestRewindSlot:
         state.sessions.discard_conversation = AsyncMock(side_effect=_moves_the_boundary)
 
         def _record_pairing(
-            _state, saved_slot, msgs, *, expected_history_key, expected_disk_older_count
+            _state,
+            saved_slot,
+            msgs,
+            *,
+            expected_history_key,
+            expected_slot,
+            expected_disk_older_count,
         ):
             seen["boundary"] = expected_disk_older_count
             return True

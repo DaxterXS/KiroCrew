@@ -731,6 +731,7 @@ async def api_chat_slot_edit_resend(request: web.Request) -> web.Response:
                     msgs_snapshot,
                     best_effort=False,
                     expected_history_key=expected_history_key,
+                    expected_slot=slot,
                 )
             )
             try:
@@ -791,12 +792,13 @@ async def api_chat_slot_edit_resend(request: web.Request) -> web.Response:
                 )
             if not saved:
                 # The save's own guards refused the write (the session was
-                # permanently deleted, or the slot was rebound to another
-                # transcript, while the write awaited its lock). Nothing was
+                # permanently deleted, the slot was rebound to another
+                # transcript, or a same-name close-and-recreate replaced the slot
+                # object, while the write awaited its lock). Nothing was
                 # persisted, so dispatching a turn now would run from state that
                 # exists only in memory.
                 logger.warning(
-                    "edit-resend: history save refused for %s (concurrent delete or rebind)",
+                    "edit-resend: history save refused for %s (concurrent delete, rebind or replace)",
                     slot.key,
                 )
                 state.push_slots_update()

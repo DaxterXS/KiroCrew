@@ -242,6 +242,43 @@ no longer destroy older turns.
   Any other caller that freezes a snapshot across an await owes the same pairing;
   `save_slot_off_loop` does not forward the parameter yet, so a boundary
   transaction routed through it still reads the live counter in the worker.
+- **Slot-object identity (`expected_slot`)**: the routing guard
+  (`expected_history_key`) refuses only when the transcript KEY moves. A same-name
+  close-and-recreate produces a DIFFERENT `_ChatSlot` object that keeps the same
+  `slot_history_key`, so the routing guard waves it through and a truncating
+  rewrite lands on the REPLACEMENT conversation's transcript, with no archive for
+  the overwritten rows (`_archive_dropped_lines` archives the OLD slot's dropped
+  tail, not the replacement's). Object identity is the only axis that
+  distinguishes the two conversations sharing one transcript. A caller passes
+  `expected_slot=slot`; the save refuses (returns `False`, writes nothing) when
+  `state._slots.get(slot.key)` is no longer that object. It is checked TWICE: a
+  cheap pre-lock early-out, and — authoritatively — inside `_locked(history_key)`
+  immediately before the write, because the patient lock acquire is itself an
+  await during which a recreate can commit ahead of a stale save, and the in-lock
+  delete-won guard cannot see it (a recreate that resumes the same transcript
+  preserves `created_at`). `state._slots.get` is a GIL-atomic dict read and `is`
+  a pointer compare, both safe from the worker thread. Threaded from the three
+  call sites that reach a truncating rewrite holding a pre-await slot reference:
+  `chat_rewind`, `chat_regenerate` (edit-resend), and `chat_fork`'s source
+  pending-rewrite flush. The periodic dirty-slot flush (`flush_slot_now`) ALSO
+  reaches the implicit rewrite path (`messages is not None or
+  slot._pending_rewrite`) and carries the SAME exposure one level up: it captures
+  the slot in the `_flush_dirty_slots` loop, then AWAITS the transcript lock, so a
+  same-name recreate can replace `state._slots[key]` during that await while the
+  worker holds the old object. It therefore passes `expected_slot=slot` too, and
+  clears the slot's dirty bit when the save WROTE or when the slot is still the
+  live `state._slots[key]` entry. That split matters because the save's `False`
+  has two meanings on this path: an `expected_slot` mismatch means the object was
+  replaced (not the live entry, never revisited by the loop -- keep the bit,
+  harmless, and load-bearing for a restored slot that then writes), while a
+  delete-won refusal fires for a slot that IS still the live entry (a cron-linked
+  tab the delete could not pop) whose session is gone -- clearing the bit there
+  stops a doomed 5s retry. `persisted or is_current` captures both. The retry is
+  bounded: the loop only flushes objects currently in `state._slots`, and a
+  refusal on one of those is delete-won (cleared), never a perpetual re-attempt.
+  **Opt-in, like the two guards above: a call site that reaches a `rewrite=True`
+  save without passing `expected_slot=slot` is unprotected and silently
+  reintroduces this bug class; nothing structurally pins the pairing.**
 - **`_disk_window_len` is deliberately left possibly SHORT after such a trim, and
   the direction is the whole argument.** The save stamps it *absolutely*, so a
   trim landing BEFORE the stamp has its decrement erased while one landing after
