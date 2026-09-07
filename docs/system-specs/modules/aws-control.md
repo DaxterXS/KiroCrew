@@ -407,10 +407,27 @@ locally; it does not restore it into live gateway state.
 pins the staged restore safety boundary.
 
 The nightly toggle records whether an account is eligible for a scheduled
-snapshot. `aws_control.hooks._run_once` resolves an account and drive, checks
-S3 consent, runs only due backups, and SEL-audits invocation, success, and
-failure. It skips unavailable accounts or absent drives rather than creating
-resources itself.
+snapshot. `aws_control.hooks._run_once` resolves an account, checks that the account
+has a working connection, then checks S3 consent, then that its drive exists, runs
+only due backups, and claims the work as a Job SDK run of the same kind and
+`dedupe_key=account` the HTTP route uses, so a nightly run and a manual one cannot
+both upload for one account and a nightly run appears in the account's `jobs` block
+like any other. That order is deliberate: the connection check warms the account
+snapshot the run's worker thread reads, since that worker cannot await, and it runs
+BEFORE consent is confirmed so no suspension point sits between the confirmation and
+`find_drive`, the first call it authorizes. Its own AWS work is an STS identity probe
+plus local CLI config reads, the same class as the identity probe the loop already
+performs before the consent check. A claim while a run is already in flight adopts it
+rather than starting a second upload. The loop follows the run and SEL-audits
+invocation, success, and failure under its own caller, which is what names a run as
+the scheduler's, and every exit after consent is confirmed writes one of those
+records -- a drive-discovery failure, a job-store read error, an absent or
+unreadable run record and a cancel all audit rather than reaching the loop
+supervisor's log-only catch; the upload gate names `backup.CALLER_JOB` itself rather than taking
+a caller argument, since there is one path to it. The drive check keeps an account
+that is not configured yet from accruing a failed run record on every wake. It skips
+unavailable accounts and absent drives rather than creating resources itself, and the
+drive is re-discovered inside the run.
 
 ## Dashboard surface
 

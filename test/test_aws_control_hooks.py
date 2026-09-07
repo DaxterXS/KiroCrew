@@ -13,6 +13,7 @@ exactly those, and never leaves a real background task running past a test.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import AsyncMock
 
@@ -134,10 +135,12 @@ class TestRunOnceEarlyReturns:
             _run(hooks._run_once())
         refuse.assert_not_called()
 
-    def test_consent_refused_skips_before_drive_lookup(self):
+    def test_consent_refused_skips_before_claiming_a_run(self):
         # Consent fails closed: if refuse_and_log returns False the run stops
-        # (it already logged + audited), before find_drive is called, so a
-        # revoked grant produces no S3 read and no upload.
+        # (it already logged + audited) before the loop even looks for the job
+        # runtime, so a revoked grant produces no run record and no upload. The
+        # drive lookup this used to name now happens inside the run, which is
+        # never claimed here.
         with (
             mock.patch.object(
                 hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
@@ -148,16 +151,22 @@ class TestRunOnceEarlyReturns:
                 AsyncMock(return_value=aws_consent.Identity(ok=True, account=ACCOUNT)),
             ),
             mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
+            mock.patch.object(
+                hooks.accounts_mod,
+                "resolve_account_profile",
+                AsyncMock(return_value=("p", "us-west-2")),
+            ),
             mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=False)),
-            mock.patch.object(hooks.storage_mod, "find_drive") as find,
+            mock.patch.object(hooks, "get_job_sdk") as get_sdk,
         ):
             _run(hooks._run_once())
-        find.assert_not_called()
+        get_sdk.assert_not_called()
 
-    def test_no_drive_bucket_skips_before_backup(self):
-        # The drive is tag-discovered per run, not trusted from memory. Until one
-        # exists there is nowhere to push, so the run returns before invoking the
-        # snapshot backup (and before the "invoked" audit).
+    def test_no_job_runtime_skips_before_any_audit(self):
+        # Without the `jobs` permission the app context carries no SDK, so there
+        # is no run to claim. The loop must NOT fall back to uploading inline --
+        # that is the untracked path this change removed -- and it must not audit
+        # an "invoked" it never performed.
         with (
             mock.patch.object(
                 hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
@@ -169,7 +178,7 @@ class TestRunOnceEarlyReturns:
             ),
             mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
             mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=True)),
-            mock.patch.object(hooks.storage_mod, "find_drive", return_value=""),
+            mock.patch.object(hooks, "get_job_sdk", return_value=None),
             mock.patch.object(hooks.backup_mod, "run_snapshot_backup") as backup,
             mock.patch.object(hooks, "_audit") as audit,
         ):
@@ -179,10 +188,10 @@ class TestRunOnceEarlyReturns:
 
 
 class TestRunOnceCancellation:
-    """A cancel during the backup is audited as ``cancelled`` and re-raised, so
+    """A cancel during the claim is audited as ``cancelled`` and re-raised, so
     teardown stops the loop cleanly AND leaves a trail that it was interrupted."""
 
-    def test_cancelled_backup_is_audited_and_reraised(self):
+    def test_cancelled_claim_is_audited_and_reraised(self):
         with (
             mock.patch.object(
                 hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
@@ -194,11 +203,18 @@ class TestRunOnceCancellation:
             ),
             mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
             mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=True)),
+            mock.patch.object(
+                hooks.accounts_mod,
+                "resolve_account_profile",
+                AsyncMock(return_value=("p", "us-west-2")),
+            ),
             mock.patch.object(hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc"),
             mock.patch.object(
-                hooks.backup_mod,
-                "run_snapshot_backup",
-                side_effect=asyncio.CancelledError(),
+                hooks,
+                "get_job_sdk",
+                return_value=SimpleNamespace(
+                    start_async=AsyncMock(side_effect=asyncio.CancelledError()),
+                ),
             ),
             mock.patch.object(hooks, "_audit") as audit,
         ):
@@ -208,6 +224,39 @@ class TestRunOnceCancellation:
         # "invoked" fired before the cancel, then "cancelled" -- never "failed",
         # because a cancel is not an error to swallow.
         assert outcomes == ["invoked", "cancelled"]
+
+    def test_a_claim_that_raises_is_audited_failed_and_swallowed(self):
+        # A bad night must not kill the loop: a claim that cannot be made is a
+        # record and a log line, and the next wake tries again.
+        with (
+            mock.patch.object(
+                hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
+            ),
+            mock.patch.object(
+                hooks.aws_consent,
+                "probe_identity",
+                AsyncMock(return_value=aws_consent.Identity(ok=True, account=ACCOUNT)),
+            ),
+            mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
+            mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=True)),
+            mock.patch.object(
+                hooks.accounts_mod,
+                "resolve_account_profile",
+                AsyncMock(return_value=("p", "us-west-2")),
+            ),
+            mock.patch.object(hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc"),
+            mock.patch.object(
+                hooks,
+                "get_job_sdk",
+                return_value=SimpleNamespace(
+                    start_async=AsyncMock(side_effect=RuntimeError("no runner")),
+                ),
+            ),
+            mock.patch.object(hooks, "_audit") as audit,
+        ):
+            _run(hooks._run_once())  # swallowed
+        outcomes = [c.args[2] for c in audit.call_args_list]
+        assert outcomes == ["invoked", "failed"]
 
 
 class TestLoopSupervisor:

@@ -62,7 +62,7 @@ class TestNoAwsCallBeforeTheGate:
     def test_discovery_never_runs_when_the_gate_refuses(self):
         order: list[str] = []
 
-        def _gate(account, profile, region, *, caller):
+        def _gate(account, profile, region):
             order.append("gate")
             raise PermissionError("consent withdrawn; upload refused")
 
@@ -144,7 +144,7 @@ class TestEveryUploadRefusalIsAudited:
         with ExitStack() as stack:
             sel_factory = self._arrange(stack, **over)
             with pytest.raises(RuntimeError, match="upload refused"):
-                backup._authorize_upload(ACCOUNT, PROFILE, REGION, caller=backup.CALLER_OWNER)
+                backup._authorize_upload(ACCOUNT, PROFILE, REGION)
 
             sel_factory.return_value.log_api_access.assert_called_once()
             kwargs = sel_factory.return_value.log_api_access.call_args.kwargs
@@ -159,45 +159,43 @@ class TestEveryUploadRefusalIsAudited:
             # HTTP view, so this audit names the account deliberately.
             assert ACCOUNT in kwargs["resources"], label
 
-    @pytest.mark.parametrize(
-        "caller,expected",
-        [("interactive", "dashboard-owner"), ("scheduled", "app:aws-control")],
-    )
-    def test_a_refusal_is_attributed_to_whoever_triggered_it(
-        self, caller: str, expected: str
-    ) -> None:
-        """Attribution has to DISTINGUISH, so both paths are asserted.
+    def test_a_refusal_names_the_worker_that_refused(self) -> None:
+        """The audited caller must be a value the call site can vouch for.
 
-        Covering the nightly path is what made a hardcoded interactive caller a
-        lie: an unattended run refused at 03:00 was recorded against the dashboard
-        owner, a person who was not there. That is the same defect as everywhere
-        else in this change -- a record asserting something nobody observed --
-        committed at the audit layer instead of the record layer.
+        This used to be two values chosen by entry point, because the nightly loop
+        uploaded inline and the runner served owner-gated surfaces only -- a
+        hardcoded interactive caller was then a lie, recording an unattended 03:00
+        refusal against a person who was not there.
 
-        A neutral string for both paths would fix the lie by discarding the truth
-        on the interactive path, where the owner really did trigger the work. So
-        each entry point states its own, and a test that checked only one value
-        would not be testing attribution at all.
+        Both triggers now reach the one registered runner, and P1 of the Job SDK
+        has no parameter channel, so the runner cannot know which one it is: only
+        ``start``'s critical section knows atomically whether a claim was fresh or
+        adopted. So the gate names the actor it can observe -- the app's job
+        worker -- and WHO ASKED is recorded by the starter, which knows it without
+        a race. The property the old pair protected is kept below: a refusal is
+        never attributed to the dashboard owner.
         """
-        chosen = backup.CALLER_OWNER if caller == "interactive" else backup.CALLER_SCHEDULED
         with ExitStack() as stack:
             sel_factory = self._arrange(stack, granted=(False, "revoked_by_owner"))
             with pytest.raises(RuntimeError, match="upload refused"):
-                backup._authorize_upload(ACCOUNT, PROFILE, REGION, caller=chosen)
+                backup._authorize_upload(ACCOUNT, PROFILE, REGION)
 
             kwargs = sel_factory.return_value.log_api_access.call_args.kwargs
-            assert kwargs["caller"] == expected
+            assert kwargs["caller"] == "app:aws-control:job"
 
-    def test_the_two_entry_points_pass_different_callers(self) -> None:
-        """The constants only matter if the call sites actually differ.
+    def test_no_upload_is_ever_attributed_to_the_dashboard_owner(self) -> None:
+        """Pinned by reading the sources, which is where the lie would live.
 
-        Pinned by reading the sources: the Job SDK runner exists because an owner
-        asked through an owner-gated route, and the nightly loop has no owner at
-        all. If both ever named the same constant, the field would be decoration.
+        The runner is the only path to the upload gate, so if it ever named an
+        interactive caller again, every unattended nightly refusal would be filed
+        against the owner. And the nightly loop must keep auditing under its own
+        name, because that record is the only one that says a run was the
+        scheduler's.
         """
-        assert backup.CALLER_OWNER != backup.CALLER_SCHEDULED
-        assert "CALLER_OWNER" in inspect.getsource(backup.make_job_runner)
-        assert "CALLER_SCHEDULED" in inspect.getsource(hooks._run_once)
+        assert "dashboard-owner" not in backup.CALLER_JOB
+        assert "CALLER_JOB" in inspect.getsource(backup.make_job_runner)
+        assert "dashboard-owner" not in inspect.getsource(backup.make_job_runner)
+        assert "aws-control-nightly" in inspect.getsource(hooks._audit)
 
     def test_teardown_is_recorded_but_not_as_an_access_denial(self) -> None:
         """Every refusal leaves a record; only access decisions are denials.
@@ -210,7 +208,7 @@ class TestEveryUploadRefusalIsAudited:
         with ExitStack() as stack:
             sel_factory = self._arrange(stack, stopping=True)
             with pytest.raises(RuntimeError, match="shutting down"):
-                backup._authorize_upload(ACCOUNT, PROFILE, REGION, caller=backup.CALLER_OWNER)
+                backup._authorize_upload(ACCOUNT, PROFILE, REGION)
 
             sel_factory.return_value.log_api_access.assert_called_once()
             kwargs = sel_factory.return_value.log_api_access.call_args.kwargs
@@ -617,7 +615,7 @@ class TestRunnerShape:
             mock.patch.object(backup, "run_snapshot_backup") as work,
         ):
             runner(SimpleNamespace(run_id="r"))
-        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET, caller=backup.CALLER_OWNER)
+        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET)
 
 
 class _FakeRun:
@@ -637,7 +635,7 @@ class TestRunnerResolvesItsTarget:
             run = _await_terminal(sdk, run_id)
         assert run.status == job_sdk.DONE
         assert run.error == ""
-        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET, caller=backup.CALLER_OWNER)
+        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET)
 
     def test_runner_rediscovers_the_drive_rather_than_trusting_a_carried_name(self, sdk):
         # The app's own rule for the nightly loop: the drive is tag-discovered
@@ -736,7 +734,7 @@ class TestRunnerResolvesItsTarget:
             run_id = sdk.start(backup.KIND_SESSIONS, dedupe_key=ACCOUNT)
             run = _await_terminal(sdk, run_id)
         assert run.status == job_sdk.DONE
-        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET, caller=backup.CALLER_OWNER)
+        work.assert_called_once_with(ACCOUNT, PROFILE, REGION, BUCKET)
         other.assert_not_called()
 
 

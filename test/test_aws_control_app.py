@@ -1933,12 +1933,14 @@ class TestRound22Hardening:
         ):
             backup.clear_stop()
             backup._authorize_upload(
-                ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER
+                ACCOUNT,
+                "p",
+                "us-west-2",
             )  # no raise
             backup.signal_stop()
             try:
                 with pytest.raises(RuntimeError, match="shutting down"):
-                    backup._authorize_upload(ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER)
+                    backup._authorize_upload(ACCOUNT, "p", "us-west-2")
             finally:
                 backup.clear_stop()
 
@@ -1953,6 +1955,16 @@ class TestRound22Hardening:
     def test_nightly_backup_emits_sel_records(self):
         from kiro_crew.apps.builtins.aws_control import hooks
 
+        # The loop now CLAIMS a Job SDK run rather than uploading inline, so the
+        # trail it owns is "invoked" at the claim and the run's own terminal
+        # status once the record settles. A stub SDK stands in for the runtime:
+        # this test is about the SEL records, not about the worker.
+        done = SimpleNamespace(status="done", error="", is_terminal=True)
+        sdk = SimpleNamespace(
+            list_active=lambda kind: [],
+            start_async=AsyncMock(return_value="run-1"),
+            get=lambda run_id: done,
+        )
         with (
             mock.patch.object(
                 hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
@@ -1965,13 +1977,12 @@ class TestRound22Hardening:
             mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
             mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=True)),
             mock.patch.object(
-                hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc123def456"
+                hooks.accounts_mod,
+                "resolve_account_profile",
+                AsyncMock(return_value=("p", "us-west-2")),
             ),
-            mock.patch.object(
-                hooks.backup_mod,
-                "run_snapshot_backup",
-                return_value={"key": "snapshots/x.tar.gz"},
-            ),
+            mock.patch.object(hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc"),
+            mock.patch.object(hooks, "get_job_sdk", return_value=sdk),
             mock.patch.object(hooks, "_audit") as audit,
         ):
             asyncio.run(hooks._run_once())
@@ -1982,6 +1993,15 @@ class TestRound22Hardening:
     def test_nightly_backup_failure_is_audited(self):
         from kiro_crew.apps.builtins.aws_control import hooks
 
+        # A run that ends "failed" is reported by the loop too, not left as an
+        # "invoked" with no resolution: the run record is where the outcome lives
+        # now, so the loop reads it rather than catching an exception.
+        failed = SimpleNamespace(status="failed", error="boom", is_terminal=True)
+        sdk = SimpleNamespace(
+            list_active=lambda kind: [],
+            start_async=AsyncMock(return_value="run-1"),
+            get=lambda run_id: failed,
+        )
         with (
             mock.patch.object(
                 hooks.deploy_profiles, "resolve_profile", return_value=("p", "us-west-2")
@@ -1994,11 +2014,12 @@ class TestRound22Hardening:
             mock.patch.object(hooks.backup_mod, "due_for_nightly", return_value=True),
             mock.patch.object(hooks.aws_consent, "refuse_and_log", AsyncMock(return_value=True)),
             mock.patch.object(
-                hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc123def456"
+                hooks.accounts_mod,
+                "resolve_account_profile",
+                AsyncMock(return_value=("p", "us-west-2")),
             ),
-            mock.patch.object(
-                hooks.backup_mod, "run_snapshot_backup", side_effect=RuntimeError("boom")
-            ),
+            mock.patch.object(hooks.storage_mod, "find_drive", return_value="kirocrew-drive-abc"),
+            mock.patch.object(hooks, "get_job_sdk", return_value=sdk),
             mock.patch.object(hooks, "_audit") as audit,
         ):
             asyncio.run(hooks._run_once())  # swallowed, not raised
@@ -2206,7 +2227,7 @@ class TestRound26Hardening:
         with p1, p2, p3, p4:
             backup.clear_stop()
             with pytest.raises(RuntimeError, match="does not name this account"):
-                backup._authorize_upload(ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER)
+                backup._authorize_upload(ACCOUNT, "p", "us-west-2")
 
     def test_grant_naming_no_account_refuses_the_upload(self):
         from kiro_crew.apps.builtins.aws_control.backend import backup
@@ -2215,7 +2236,7 @@ class TestRound26Hardening:
         with p1, p2, p3, p4:
             backup.clear_stop()
             with pytest.raises(RuntimeError, match="does not name this account"):
-                backup._authorize_upload(ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER)
+                backup._authorize_upload(ACCOUNT, "p", "us-west-2")
 
     def test_matching_grant_account_allows_the_upload(self):
         from kiro_crew.apps.builtins.aws_control.backend import backup
@@ -2224,7 +2245,9 @@ class TestRound26Hardening:
         with p1, p2, p3, p4:
             backup.clear_stop()
             backup._authorize_upload(
-                ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER
+                ACCOUNT,
+                "p",
+                "us-west-2",
             )  # no raise
 
     def test_grant_withdrawn_mid_build_refuses_the_upload(self):
@@ -2241,7 +2264,7 @@ class TestRound26Hardening:
         ):
             backup.clear_stop()
             with pytest.raises(RuntimeError, match="withdrawn"):
-                backup._authorize_upload(ACCOUNT, "p", "us-west-2", caller=backup.CALLER_OWNER)
+                backup._authorize_upload(ACCOUNT, "p", "us-west-2")
 
 
 class TestProfileDiscovery:
