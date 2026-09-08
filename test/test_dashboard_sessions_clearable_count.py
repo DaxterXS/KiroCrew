@@ -154,7 +154,7 @@ def test_open_tab_is_excluded_and_reported_as_skipped() -> None:
     k1, k2 = _history_key_for("chat-1"), _history_key_for("chat-2")
     state, _ = _fake_state([{"key": k1}, {"key": k2}], slots={"chat-1": _FakeSlot("chat-1")})
 
-    clearable, skipped = _clearable_history_keys(state, state.conversation_log)
+    clearable, skipped, _unreadable = _clearable_history_keys(state, state.conversation_log)
 
     assert clearable == [k2]
     assert skipped == 1
@@ -163,7 +163,7 @@ def test_open_tab_is_excluded_and_reported_as_skipped() -> None:
 def test_pinned_session_is_excluded() -> None:
     state, _ = _fake_state([{"key": "a"}, {"key": "b"}], metadata={"a": {"pinned": True}})
 
-    clearable, skipped = _clearable_history_keys(state, state.conversation_log)
+    clearable, skipped, _unreadable = _clearable_history_keys(state, state.conversation_log)
 
     assert clearable == ["b"]
     assert skipped == 1
@@ -173,10 +173,10 @@ def test_unreadable_metadata_is_excluded() -> None:
     """A transient read failure must not read as permission to delete."""
     state, _ = _fake_state([{"key": "a"}, {"key": "b"}], unreadable_keys={"a"})
 
-    clearable, skipped = _clearable_history_keys(state, state.conversation_log)
+    clearable, skipped, unreadable = _clearable_history_keys(state, state.conversation_log)
 
     assert clearable == ["b"]
-    assert skipped == 1
+    assert (skipped, unreadable) == (0, ["a"])
 
 
 def test_unexpected_metadata_failure_is_excluded() -> None:
@@ -184,16 +184,16 @@ def test_unexpected_metadata_failure_is_excluded() -> None:
     genuinely unexpected failure must still not read as permission to delete."""
     state, _ = _fake_state([{"key": "a"}, {"key": "b"}], raising_keys={"a"})
 
-    clearable, skipped = _clearable_history_keys(state, state.conversation_log)
+    clearable, skipped, unreadable = _clearable_history_keys(state, state.conversation_log)
 
     assert clearable == ["b"]
-    assert skipped == 1
+    assert (skipped, unreadable) == (0, ["a"])
 
 
 def test_rows_without_a_key_are_ignored() -> None:
     state, _ = _fake_state([{"key": ""}, {}, {"key": "b"}])
 
-    clearable, _skipped = _clearable_history_keys(state, state.conversation_log)
+    clearable, _skipped, _unreadable = _clearable_history_keys(state, state.conversation_log)
 
     assert clearable == ["b"]
 
@@ -252,7 +252,7 @@ async def test_count_and_bulk_delete_resolve_the_same_set() -> None:
     metadata = {k_pinned: {"pinned": True}}
 
     state, _ = _fake_state(sessions, slots=slots, metadata=metadata)
-    counted, _skipped = _clearable_history_keys(state, state.conversation_log)
+    counted, _skipped, _unreadable = _clearable_history_keys(state, state.conversation_log)
 
     delete_state, deleted = _fake_state(sessions, slots=slots, metadata=metadata)
     with (
