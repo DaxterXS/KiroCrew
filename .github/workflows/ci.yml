@@ -824,10 +824,13 @@ jobs:
     name: Backend Tests (macOS)
     needs: [await-fast-gate]
     runs-on: macos-15
-    # ~1.5x the slowest shard measured on the first full-suite run of this branch.
-    # Deliberately tighter than backend-test-windows' 40: a runaway macOS shard
-    # costs 10x a Linux one, so the cap is the spend guard as much as the hang guard.
-    timeout-minutes: 30
+    # 40, matching backend-test-windows. MEASURED on the first full-suite run of
+    # this branch (run 34288884863): shards 1 and 2 finished their pytest step in
+    # 20.3 and 20.1 minutes, and shard 3 was still running past 27, so a 30-minute
+    # cap cancelled it. 1.5x the slowest observed shard is therefore at least 40.
+    # This is still a spend guard, not just a hang guard: a runaway macOS shard
+    # costs about ten times a Linux one.
+    timeout-minutes: 40
     strategy:
       # Full failure picture across shards, same as backend-test.
       fail-fast: false

@@ -14,6 +14,7 @@
 # (AF_UNIX, PGID, PTY, mode bits, symlink privilege) do not apply. This list is
 # expected to stay short or empty.
 #
-# Empty today: the first full-suite macOS shard runs (PR for
-# ci/macos-full-suite-shards) needed no file-level exclusion. Every gap found was
-# addressable as a node id or a precise skipif.
+# Empty today: the first full-suite macOS shard runs (run 34288884863) needed no
+# file-level exclusion. Every failure was addressable as a node id in
+# macos-expected-failures.txt, including the two frame-recording suites, whose
+# refusal-path tests still pass here and are deliberately kept running.
