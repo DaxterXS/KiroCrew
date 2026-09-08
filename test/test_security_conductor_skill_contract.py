@@ -118,11 +118,33 @@ class TestSkillIsInstallable:
         # loading the body, so it has to name the agent it is the procedure for.
         assert "kirocrew-security-conductor" in meta["description"]
 
-    def test_no_bundled_scripts_are_shipped_here(self) -> None:
-        """Sibling changes own the scripts. This one must not have created a stub:
-        a present-but-empty script is worse than an absent one, because the
-        absent-script rule below stops reading as the live path."""
-        assert not (SKILL_DIR / "scripts").exists()
+    def test_every_shipped_script_is_named_and_substantive(self) -> None:
+        """No stubs, and no script the prose does not cite.
+
+        The scripts land across sibling changes, so this directory is populated a
+        file at a time and `BUNDLED_SCRIPTS` above is the whole set the procedure
+        delegates to. Two ways that goes wrong, and neither goes red anywhere
+        else: a script appears that the body never names, which is a capability
+        with no procedure governing it; or a placeholder is committed to reserve
+        the name, which is worse than an absent file because
+        `test_an_absent_script_is_unknown_and_not_permission` below stops reading
+        as the live path the moment the file exists.
+        """
+        scripts_dir = SKILL_DIR / "scripts"
+        if not scripts_dir.is_dir():
+            return
+        shipped = sorted(p for p in scripts_dir.iterdir() if p.is_file())
+        for path in shipped:
+            assert path.name in BUNDLED_SCRIPTS, f"uncited script shipped: {path.name}"
+            # A stub is a file whose body is imports and a docstring. Judged by
+            # executable content rather than byte count so a long banner comment
+            # cannot pass for an implementation.
+            body = [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            assert len(body) > 20, f"placeholder script committed: {path.name}"
 
 
 class TestTheProcedureDelegatesToItsScripts:
