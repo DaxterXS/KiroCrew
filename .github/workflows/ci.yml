@@ -798,26 +798,43 @@ jobs:
         # test/windows-expected-failures.txt, which is the mechanism a whole-file deselect
         # was standing in for.
 
-  # macOS gateway line. Until this job existed macOS had ZERO pytest coverage in
-  # CI -- the macos-14 runners appear only in build.yml, build-desktop.yml and
+  # macOS regression line. Until this job existed macOS had ZERO pytest coverage in
+  # CI -- the macOS runners appeared only in build.yml, build-desktop.yml and
   # sign-and-notarize.yml, all of which merely build and notarize the desktop
   # app. That left the macOS-only identity primitives (LOCAL_PEERPID for the
   # peer pid, libproc for the process start id) verified by nothing, on the
   # platform several maintainers develop on.
   #
-  # Deliberately SCOPED, not the full suite: a full macOS run would need its own
-  # exclusion burn-down first (the Windows line needed 23 file exclusions plus
-  # ~237 node skips before it held), and shipping a job that is red on arrival
-  # trains people to ignore it. The glob keeps the scope from going stale -- a
-  # new test_mcp_gateway_* suite is picked up without editing this file, which a
-  # hand-maintained list would not do.
+  # It shipped SCOPED to a 51-file glob (gateway, socketsec, platform-compat, pod,
+  # MCP-apps) because a full run needed its own exclusion burn-down first. That
+  # burn-down is done, so this job now runs the WHOLE suite in duration-balanced
+  # shards, the same shape as backend-test-windows. 51 of 2094 test files was 2.4
+  # percent of the tree: a POSIX-but-not-Linux regression outside that glob (the
+  # `ru_maxrss` unit difference, BSD `ps`/`stat` argv, case-insensitive HFS+ path
+  # comparison) had no CI that could catch it.
   #
-  # Cheap enough to need no sharding: these suites are ~230 tests and run in
-  # about 4 seconds, so the job's wall time is essentially dependency install.
+  # macos-15 (Apple Silicon), pinned by label rather than macos-latest: macos-14 is
+  # deprecated by GitHub, and macos-latest moves under us, which would turn an image
+  # rollout into an unexplained red on an unrelated pull request.
+  #
+  # 3 shards, not Windows' 4. macOS bills at 10x Linux per minute, so the shard
+  # count is the billing knob; 3 is the smallest count that keeps the slowest shard
+  # inside a budget comparable to the Windows job.
   backend-test-macos:
-    name: Gateway Tests (macOS)
+    name: Backend Tests (macOS)
     needs: [await-fast-gate]
-    runs-on: macos-14
+    runs-on: macos-15
+    # ~1.5x the slowest shard measured on the first full-suite run of this branch.
+    # Deliberately tighter than backend-test-windows' 40: a runaway macOS shard
+    # costs 10x a Linux one, so the cap is the spend guard as much as the hang guard.
+    timeout-minutes: 30
+    strategy:
+      # Full failure picture across shards, same as backend-test.
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3]
+    env:
+      SHARD_COUNT: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -848,6 +865,11 @@ jobs:
       # the gate it proves went unverified. That is the same blindness that let
       # four mutation-verified tests sit unrun inside conftest's Windows
       # collect_ignore. Run it by node id and fail unless it actually PASSED.
+      #
+      # Kept on every shard, not folded into the sharded run: the sharded step is
+      # `-q` and cannot prove a named test passed, and pytest-split would put this
+      # node id on exactly one shard, so a shard-1-only canary would go unrun
+      # whenever that shard died early.
       - name: Assert the macOS peer-identity canary runs (not skipped)
         run: |
           set -o pipefail
@@ -863,16 +885,27 @@ jobs:
             exit 1
           }
 
-      - name: Run gateway + platform suites
+      - name: Run tests (macOS shard ${{ matrix.group }}/${{ env.SHARD_COUNT }})
+        # Flags copied verbatim from backend-test-windows, including
+        # --max-worker-restart=0. That flag's stated reason is Windows-specific
+        # (no SIGALRM, so pytest-timeout kills the whole xdist worker), but the
+        # xdist node-replacement path it avoids -- #2803's broken invariant, and
+        # #4227's session that never completes and burns the full cap -- is
+        # platform-independent, and a burnt cap costs 10x here. --no-cov because
+        # coverage-combine merges ubuntu shards only.
+        #
+        # No surface selector and nothing deselected, same as the Windows job:
+        # `-n auto` already saturates the runner, so a shorter file list does not
+        # shorten a shard. Residual darwin gaps are node ids in
+        # test/macos-expected-failures.txt, applied by the rootdir conftest through
+        # the same matcher as the Windows list.
         run: |
-          pytest -q -rs --timeout=180 --no-cov \
-            test/test_mcp_gateway_*.py \
-            test/test_socketsec.py \
-            test/test_platform_compat.py \
-            test/test_mcp_apps_e2e.py \
-            test/test_pod*.py \
-            test/test_service.py \
-            test/test_dev_fleet_app.py
+          # Same as backend-test (#7296): the `python` matcher annotates any
+          # traceback in the log, including one printed inside a warning, and
+          # never matches a pytest failure.
+          echo "::remove-matcher owner=python::"
+          pytest -q -n auto --timeout=180 --no-cov --max-worker-restart=0 \
+            --splits "$SHARD_COUNT" --group ${{ matrix.group }}
 
   # The one job where the sandbox-dependent tests EXECUTE rather than skip. They need
   # unprivileged user namespaces (unshare NEWNS), which ubuntu-24.04 restricts via

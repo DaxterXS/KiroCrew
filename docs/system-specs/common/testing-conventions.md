@@ -558,6 +558,15 @@ which testpath asked for the workers.
   on `[` matched a *different* string for grouped vs ungrouped tests and for `-n0` vs
   `loadgroup` runs. Never add the `@group` suffix to an entry — it makes the line match
   in one invocation and silently miss in another.
+
+  **macOS uses the same list mechanism, not a second one.**
+  `test/macos-expected-failures.txt` is applied by the same rootdir
+  `_apply_tracked_gap_list` matcher, with the same plain-node-id spelling and the same
+  burn-down semantics: anything not on the list still fails the macOS shards. Prefer a
+  precise `skipif(sys.platform == "darwin", reason=...)` on the test when the reason is
+  a named capability difference; use the list when the gap is a real one to be fixed
+  later, with a `# TODO` reason line above the entry. `test/macos-collect-ignore.txt`
+  exists for the blunt case only — a file that cannot be *collected* on darwin.
 - Tests SHOULD be fast (< 1s each)
 - Async tests MUST use `@pytest.mark.asyncio` — and ONLY async tests. The mark on a
   plain `def` is accepted silently by pytest-asyncio strict mode and the test then
@@ -1434,11 +1443,15 @@ git diff --stat "$f"                     # should show only what you had before
 
 ### Shard balance
 
-`ci.yml` splits the backend suite into 4 `pytest-split` groups. Splitting is balanced by
+`ci.yml` splits the backend suite into 4 `pytest-split` groups on Linux and Windows,
+and 3 on macOS. Splitting is balanced by
 recorded runtime **only when a `.test_durations` file is committed**; without one
 pytest-split falls back to an even split by test *count*. No such file is committed here:
 `test-durations.yml` would generate one weekly but has failed on a transient `git push`
-502 both times it ran, so it has never landed.
+502 both times it ran, so it has never landed. So every OS splits by count today, and
+there is no Linux-recorded duration file that could mis-balance the Windows or macOS
+shards. If one is ever committed, note that it is recorded on Linux: check the macOS
+shard spread afterwards rather than assuming it improved.
 
 **Measure a shard by running it, not by summing durations.** Each shard runs its own
 tests at `-n 4`, so per-test times from a `--store-durations` run include worker

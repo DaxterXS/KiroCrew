@@ -1,0 +1,13 @@
+# Known macOS test gaps -- burn-down backlog for full macOS parity.
+#
+# Applied by conftest.py::pytest_collection_modifyitems (rootdir) on macOS
+# ONLY, through the same _apply_tracked_gap_list matcher that applies
+# windows-expected-failures.txt: each listed test (all parametrizations) is
+# skipped there and runs normally on the Linux matrix. Entries are
+# unparametrized pytest node ids -- file, class, function, no [params] and no
+# @group suffix. Captured from the first full-suite macOS shard runs
+# (ci/macos-full-suite-shards). Fix the test (or the product gap) and DELETE
+# the line -- additions require a reason in the PR.
+#
+# Reason lines are `# <reason>` immediately above the entries they cover, so the
+# PR body's count-by-reason table can be rebuilt from this file.

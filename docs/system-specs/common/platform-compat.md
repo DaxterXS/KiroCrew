@@ -51,9 +51,20 @@ produces exactly those silent failures, which is why the helper is named per cal
 
 ## Verifying a change
 
-Verify process, signal, file-lock and metrics changes on macOS **and** Linux; the
-Windows shards in CI cover the third. A test that only ever runs on the author's
-platform is how a silent no-op ships.
+CI holds all three platforms: the `backend-test` shards cover Linux,
+`backend-test-windows` covers Windows, and `backend-test-macos` covers macOS. All
+three run the whole suite, so a POSIX call that only works on Linux goes red on the
+macOS shards rather than shipping.
+
+Still run process, signal, file-lock and metrics changes on macOS **and** Linux
+locally where you can. A test that only ever runs on the author's platform is how a
+silent no-op ships, and a CI red found after the push costs a round trip.
+
+A test that cannot pass on macOS gets a precise
+`skipif(sys.platform == "darwin", reason=...)` naming the capability, or its node id
+in `test/macos-expected-failures.txt` -- the burn-down list applied by the rootdir
+`conftest.py`, same mechanism as `windows-expected-failures.txt`. Never widen a
+platform assertion to make a red go away.
 
 Frontend support is Chrome, Firefox, Safari and Edge, using standard Web APIs and
 guarding the rest (`typeof Notification !== 'undefined'`).
