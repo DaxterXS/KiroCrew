@@ -111,30 +111,46 @@ async def api_chat_slot_regenerate(request: web.Request) -> web.Response:
         slot._pending_rewrite = True
         slot._pending_variants = variants
 
-        # The transcript this truncation was authorized against. Captured
-        # BEFORE the write's await: that await frees the event loop while the
-        # worker thread runs, and a same-name close-and-recreate is NOT
-        # serialized against this slot._lock (the cleanup pops state._slots[name]
-        # and get_or_create_slot re-inserts, neither taking the original lock).
-        # Without the pin the truncating rewrite would resolve its file from the
-        # object it was handed -- the original slot -- and land on the
-        # replacement's transcript. save_slot_off_loop refuses (returns False,
-        # nothing written) when the routing no longer resolves to this key,
-        # exactly the guard edit-resend below already carries. On refusal the
-        # original slot is being torn down and its regeneration has no future,
-        # so nothing that would otherwise persist is lost; the refusal is
-        # recorded in the save's own "routing moved" log line. best_effort keeps
-        # the site fire-and-forget: a genuine transient failure re-arms _dirty
-        # (and _pending_rewrite is already set) so the periodic flush retries.
+        # Pin the transcript and the slot object this truncation was authorized
+        # against. Both are read BEFORE the write's await: that await frees the
+        # event loop while the worker thread runs, and a same-name
+        # close-and-recreate is NOT serialized against this slot._lock (the
+        # cleanup pops state._slots[name] and get_or_create_slot re-inserts,
+        # neither taking the original lock).
+        #
+        # Two axes can move, and they need two checks, matching the pair
+        # edit-resend below carries:
+        #   * routing -- save_slot_off_loop refuses the write (returns False,
+        #     nothing written) when the slot's routing resolves to a different
+        #     key at write time. This catches a RENAMED replacement.
+        #   * object identity -- a same-name recreate that resumes the same
+        #     transcript keeps the history key identical, so the routing check
+        #     passes and the stale rewrite would land on the replacement anyway.
+        #     Re-reading state._slots[name] immediately before the write, under
+        #     the lock with no await between, is what catches that: if the slot
+        #     was replaced we skip the write entirely.
+        #
+        # On either refusal the original slot is being torn down and its
+        # regeneration has no future, so nothing that would otherwise persist is
+        # lost; the routing refusal is recorded in the save's own log line, and
+        # the identity refusal logs here. best_effort keeps the site
+        # fire-and-forget: a genuine transient failure re-arms _dirty (and
+        # _pending_rewrite is already set) so the periodic flush retries.
         expected_history_key = slot_history_key(slot)
         try:
             msgs_snapshot = list(slot.messages)
-            await save_slot_off_loop(
-                state,
-                slot,
-                msgs_snapshot,
-                expected_history_key=expected_history_key,
-            )
+            if state._slots.get(name) is not slot:
+                logger.warning(
+                    "Regenerate: slot %s was replaced before the rewrite; skipping the write",
+                    name,
+                )
+            else:
+                await save_slot_off_loop(
+                    state,
+                    slot,
+                    msgs_snapshot,
+                    expected_history_key=expected_history_key,
+                )
         except Exception:
             logger.warning("Regenerate: failed to rewrite session history", exc_info=True)
 
@@ -231,24 +247,29 @@ async def api_chat_slot_switch_variant(request: web.Request) -> web.Response:
         target_dict["variant_idx"] = idx
         slot._dirty = True
         slot._resumed_count = 0
-        # Same slot-identity pin as regenerate above and edit-resend below: a
-        # same-name close-and-recreate can swap state._slots[name] while this
-        # save is parked in its worker thread (the recreate does not take this
-        # slot._lock), and _save_slot_to_history resolves its target file from
-        # the object it was handed. Pin the transcript this switch was
-        # authorized against so the write refuses (False, nothing written)
-        # rather than rewriting the replacement's transcript. Captured before
-        # the await. best_effort re-arms _dirty on a transient failure so the
-        # periodic flush retries the write.
+        # Same two-axis pin as regenerate above, matching the pair edit-resend
+        # carries: routing (save_slot_off_loop refuses when the slot resolves to
+        # a different transcript at write time -- a renamed replacement) and
+        # object identity (state._slots[name] read immediately before the write,
+        # under the lock with no await between -- a same-name recreate that
+        # resumes the same transcript keeps the key identical, so only the
+        # identity check catches it). Both read before the await. best_effort
+        # re-arms _dirty on a transient failure so the periodic flush retries.
         expected_history_key = slot_history_key(slot)
         try:
             msgs_snapshot = list(slot.messages)
-            await save_slot_off_loop(
-                state,
-                slot,
-                msgs_snapshot,
-                expected_history_key=expected_history_key,
-            )
+            if state._slots.get(name) is not slot:
+                logger.warning(
+                    "switch-variant: slot %s was replaced before the write; skipping the write",
+                    name,
+                )
+            else:
+                await save_slot_off_loop(
+                    state,
+                    slot,
+                    msgs_snapshot,
+                    expected_history_key=expected_history_key,
+                )
         except Exception:
             logger.warning("switch-variant: failed to persist", exc_info=True)
         sel().log_api_access(
