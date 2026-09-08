@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from kiro_crew import model_registry as mr
+from kiro_crew.effort import EFFORT_LEVELS, model_supports_effort
 
 
 class TestModelRegistry:
@@ -107,6 +108,17 @@ class TestModelRegistry:
         assert mr.model_window("gpt-5.6-sol") == 272_000
         assert mr.model_window("gpt-5.6-terra") == 272_000
         assert mr.model_window("gpt-5.6-luna") == 272_000
+        # GPT-6 Astra carries a 1.05M window floor for headless starts.
+        assert mr.model_window("gpt-6-astra") == 1_050_000
+        assert mr.has_known_window("gpt-6-astra") is True
+        assert mr.window_source("gpt-6-astra") == "supplementary"
+        # Astra is effort-capable via the GPT heuristic; its live levels come
+        # from the model itself and carry no "none" tier.
+        assert model_supports_effort("gpt-6-astra") is True
+        assert "none" not in EFFORT_LEVELS
+        # The kiro id passes through translation unchanged, so a picked Astra
+        # actually runs on kiro rather than a folded default.
+        assert mr.to_acp_id("gpt-6-astra") == "gpt-6-astra"
         assert mr.model_window("qwen3-coder-next") == 256_000
         assert mr.model_window("qwen3-coder-480b") == 256_000
         assert mr.model_window("glm-4.7-flash") == 128_000

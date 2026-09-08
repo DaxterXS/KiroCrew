@@ -148,6 +148,11 @@ _SUPPLEMENTARY_WINDOWS: dict[str, int] = {
     "gpt-5.6-sol": 272_000,
     "gpt-5.6-terra": 272_000,
     "gpt-5.6-luna": 272_000,
+    # GPT-6 Astra window per OpenAI's model catalogue (1.05M, not 1.1M). The
+    # kiro-list cache overrides this once /api/models seeds it; this is the
+    # headless-start floor (Slack/cron) so the context assembler does not fall
+    # through to the 1M reference and over-assemble.
+    "gpt-6-astra": 1_050_000,
     "qwen3-coder-next": 256_000,
     # Legacy / not-currently-served kiro ids, kept as harmless static floors.
     "kimi-k2.5": 256_000,
