@@ -1641,6 +1641,8 @@ so §12.1 no longer gates PR 4 and §12.2 no longer gates PR 2. The others were
 never blocking; each records a conservative default and the condition that
 reopens it.
 
+§12.5's mirrors half and the unpriced auth cost are answered, with measurements, in [`rfc-agent-sdk-provider-onboarding.md`](rfc-agent-sdk-provider-onboarding.md).
+
 1. **Who owns agent-process supervision? — DECIDED: the supervisor.**
    `session_pid.py`'s agent-process half moves into `agent_sdk`; its non-agent
    PID duties (MCP probes, cron scripts) stay where they are. The decision stands;
