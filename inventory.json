@@ -640,5 +640,281 @@
     "blob": "6152137d83c96aba83af4925e897b23fda906838",
     "bytes": 2923,
     "sha256": "e0187f91b43e52b2cc9dc193936f71f2179a397ce938fb470a2693057656ed2c"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/legacy-member-memory-initialize.png",
+    "blob": "5cc35ef1cc61e86b7bae3655aafac187c27eedcc",
+    "bytes": 127032,
+    "sha256": "b7aac48e16cd142376101a3d1b05361ce42c4eb515a65cafdb351923eb8669cd"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/legacy-member-memory-initialized.png",
+    "blob": "4d384d125d5159e36198facc4edf6d84d9ffe636",
+    "bytes": 100331,
+    "sha256": "8de63b135ace0215e97442a6206315751547cce0dc82c01cfea9b20347738676"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/legacy-member-memory-refusal.png",
+    "blob": "5f201c284f738aa51e147c68c0bef08c10e8c334",
+    "bytes": 97766,
+    "sha256": "e994b1f5dcc9159a6525de4a010e9f909ff23efef9272bf39a4a32de5d5a2cdc"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/member-memory-evidence.json",
+    "blob": "d78c9050e9b0c40059c29aaeb9345566a4e94861",
+    "bytes": 446,
+    "sha256": "381a11bc3867a31e88d315ce0f1717bc3f0ae3434bfd693587ce96e8eb042dbb"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/member-memory-walkthrough.webm",
+    "blob": "bb02158430a89c4dbc7388788b9d8ebf8c5226c3",
+    "bytes": 373927,
+    "sha256": "353d3cb165e8c4b2c11c97ebfcf67b4a1278a87b917c7a2b7c3b9253d6ca1d05"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-evidence.json",
+    "blob": "d1fa0698a2d28d150d6d7034c3c3060eb8986dc9",
+    "bytes": 454,
+    "sha256": "9488157c93d94030f90ac282318111939cd22785e8e75b80b2326f2568ab7050"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-walkthrough.webm",
+    "blob": "8ec15ae0bf651ee120a5fc0f4e41615a7247f5a6",
+    "bytes": 208018,
+    "sha256": "50588570e762c8929fc9488ed96f83444de708b530e79e61da80711488b345bd"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-copy-dialog.png",
+    "blob": "5f91602bb3e549fee7734389e6f0c14ea93f99e3",
+    "bytes": 99428,
+    "sha256": "eec7d69c9cb7ab3f7a3b3e36161e53b60be92fecaa6e2de2affe712207aa555e"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-correction-preview.png",
+    "blob": "fa144ef6b7722187cdaf73b0922770f037379ddc",
+    "bytes": 99277,
+    "sha256": "50ca26fa9321eef4f917fc5a55de89d79745fa3c556d416eed593762744ff41c"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-desktop.png",
+    "blob": "f8665bfd41589d6d8ec1102c86cd62413cfd3fae",
+    "bytes": 111066,
+    "sha256": "97548819c63e8fa19fb1eb02537a6b64a8925de2c9a0c874b01d23f5ab51c9cf"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-details-desktop.png",
+    "blob": "eb77c493ac7fe9efa59b99c6e4f23b295d2e2ae0",
+    "bytes": 120920,
+    "sha256": "600e6df7f76c71001763977be8996256c72bc910683e3487f3350ac7c56a6cc5"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-evidence.json",
+    "blob": "bd3fbb739284386d3b238ceeaee1a9474ff63534",
+    "bytes": 441,
+    "sha256": "9efad707eec90ca429bec5ebc57344ef3bfed3d52c9832945e0610dac0a37c55"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-mobile.png",
+    "blob": "5261f25f5e3ad004601c36e40e480c79ba280f1a",
+    "bytes": 56383,
+    "sha256": "11f52642506d70e06f195d580d12a9fa294e4caa0c8a0227dbe4f0ff5798cc52"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-owner-empty.png",
+    "blob": "1129f4cd5bbf03103088f935741ec123b36396ad",
+    "bytes": 102430,
+    "sha256": "ddd8b21387a1c0d5e1aaa1bf1817bcb31a108024f694721a68f9a55105956312"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-profile.png",
+    "blob": "4583f99986b27687b904a0a5605881d43e9adcc0",
+    "bytes": 101329,
+    "sha256": "0abbccd353cc6be716aac13b517cec2a36a9b31c4950e7a6ffd64e6955e8bbff"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-recall-before.png",
+    "blob": "1e10d69bb1cc206ffbd7611f0b513d298c596f96",
+    "bytes": 113176,
+    "sha256": "1205334966e55251dc810da8be3696774fb20c3b634aad840efa0060654b40c7"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-recall-evidence.png",
+    "blob": "de45db4b0e4173b94719a7668936c48dd5d8dca2",
+    "bytes": 111221,
+    "sha256": "8cbb6439128479bf5c765034ea207eceac76760e02a55e472b7f843dd216a6de"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-separate-empty-member.png",
+    "blob": "d00d9fd2751bcc610267b3a0950a30dbc58260a5",
+    "bytes": 102333,
+    "sha256": "e0ba7643d2c8376216294060aafac4783ba3a7a9e4ac8bfc051428f42460597b"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-walkthrough.webm",
+    "blob": "1c6cd24a681fee8bbdcb2056fdb378facd2520f5",
+    "bytes": 734333,
+    "sha256": "c71acb94d05e58aa1501a70febe14db666f9e62b9ea44aea4c87bb7fcff84991"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-advanced-analysis.png",
+    "blob": "fda177ce5b06a9ca413fd9265cecb379ad6ae317",
+    "bytes": 87197,
+    "sha256": "630cbb81178fe5738d9dca1287110c9bf0b775e2d8f1d25281d844bdd977abf3"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-evidence.json",
+    "blob": "70cda8e53ced1d4036a4da2ff1df4ed79b6ba002",
+    "bytes": 445,
+    "sha256": "df74745da29aaa96cdd8b2281dfc16f1f4c26cefdf30faa86ab8a32116dbc057"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-cancelled.png",
+    "blob": "9fa3e967b42f58f27b9e49f2e7d426d696d2794c",
+    "bytes": 114667,
+    "sha256": "cfaeb45cafa27dd036ed1b0dc98819f26e7db5f2e689c1d2c776c951a60bf643"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-confirm.png",
+    "blob": "30031a90412a5df50a94e1a0f47f653a16f56246",
+    "bytes": 118917,
+    "sha256": "e64606eca9d5d96b7c57bf3e54f53dd13c061eef1195724e4c498f8410f1296e"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-pending.png",
+    "blob": "61ee147153375d3d410860324943797b6e76d529",
+    "bytes": 116167,
+    "sha256": "58384297be60f865f65f0a0555031a7c82508558bb3c4464c916c7c152adea0f"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-walkthrough.webm",
+    "blob": "b6c47468da92a99f29fbcaced600140d145523ce",
+    "bytes": 248057,
+    "sha256": "1fe978c662b14ce2096d537db9ff73d8cd2650f98fd5ed220ef8efbfb975b81e"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+    "blob": "d899687ca8c5867938c8dd69365ca5194b1f24b0",
+    "bytes": 449,
+    "sha256": "bfe10c3f8df5b83ffacf9931e6a7aea17f77365a842f453d5312d012a05b951a"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+    "blob": "4113a11b25d0a2de6ad9031bebc895d47b399f8c",
+    "bytes": 611681,
+    "sha256": "b427dc8ff2fe9d89b321bc7868eb214eae3b6fa76fc6982c759e1672064673ca"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-preview-mobile.png",
+    "blob": "2c1fb4d28d6b7d49aa17bf1a87ef4bb105cb47f9",
+    "bytes": 64475,
+    "sha256": "a3f9a5034bc37cc042267f57ee1471996e58c0325b3bfd19f52776037f37ccc8"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-selection.png",
+    "blob": "d737cc37a7597eab0dd1f0adc9ededd311ec7907",
+    "bytes": 113888,
+    "sha256": "bcdd5283883e2c4fccdf41acec87a006aa92bd69173010f0242f8eef0af1202c"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-forget-preview-mobile.png",
+    "blob": "0c31ce34d4a0fbbceb972b23f3eca6de02f62328",
+    "bytes": 61815,
+    "sha256": "798808b91593c91a4f929595a9a58c394ff33cea24845fee7463e42296255169"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-global-overview.png",
+    "blob": "361760a5cb51a8857411690790bfa83d65c0fa58",
+    "bytes": 104686,
+    "sha256": "2f3340e584a657e39826d202adf24bfb0b4ef21d908582c97ee8d8f52f5d45c3"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-evidence.json",
+    "blob": "07d93f10c3cd0374b447f9b448b1434cfda98787",
+    "bytes": 425,
+    "sha256": "c2cb832b0e71747c6c701cd7a0216a542c2f3c0fd6cc881cedb7868d6539c02a"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-walkthrough.webm",
+    "blob": "cfe0accda60170559de86f3ed44b9a064ef6ea08",
+    "bytes": 414007,
+    "sha256": "9a58b11678cf4cc8917812664e5f9ea919ee35ada11b2a3d24f0f50914725c98"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+    "blob": "89967d9f62c49c947811ef48ac577892f84d71ab",
+    "bytes": 449,
+    "sha256": "5a68b35615da60dc05da648669064ef7e84775558348b9d7684955ac0f79d37e"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+    "blob": "ab7380a733b194b1eb8264ef8007d6f2ebcafcb6",
+    "bytes": 497377,
+    "sha256": "f827518627b44c3b355d610d11f8b3c6d0dc6daa2822929fed21745cfb7838b9"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-preview-mobile.png",
+    "blob": "3cd7e974f18eb3a71a8b915123adc1becbe3a400",
+    "bytes": 65764,
+    "sha256": "9faec115d7b093ad7b26fbf35ffc2de2cc42fb9e91bf402a73d7c80f2d38d4dd"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-selection.png",
+    "blob": "05c6e1ad08be5730ab4264cc153902ade06d3d66",
+    "bytes": 124821,
+    "sha256": "ebfe3a0fa489aceb7cd94574cd9d5f274fe3a2d762ad782b567021ce35b0067d"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-forget-preview-mobile.png",
+    "blob": "27395b5ef5315d37e140c05279a7af340a715558",
+    "bytes": 62141,
+    "sha256": "5a74010f351ead50131bc86357ed0421a2fc868a6b99d2746ab08f88fb826c4c"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-evidence.json",
+    "blob": "bf307787c80541cb9b93530baa17903b7622876f",
+    "bytes": 430,
+    "sha256": "35b4f4aff6bde23283c3c1c4b8bedb530538ad79bab5deb45b04c702cce47220"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-review-proposals.png",
+    "blob": "b494ceface3f704f1e897af9f0ca465996299acb",
+    "bytes": 130730,
+    "sha256": "6ba95f5c85fd2798523d371d6562e158835130a353721d23a76a02ee832ef826"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0/member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-walkthrough.webm",
+    "blob": "2213f7bda7e3e43991ae40db6f08ff5ecb5b7c24",
+    "bytes": 691450,
+    "sha256": "65f69b41d76b96d1bfbf5d9e4612d22a9a033a0a5c6561fb83ad0037a18ff6de"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0-benchmark/member-v2-hybrid-qwen3.json",
+    "blob": "59795a61086a18f92d04c8bfb6a6ba3d152cdf68",
+    "bytes": 197357,
+    "sha256": "2727db85de0515c10b42166e8175eada0151e3dab232ac4a0373f32546ada611"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0-benchmark/provenance.json",
+    "blob": "f3ef31c8daaf537fa6e6ae82ea89bb8269701b1e",
+    "bytes": 172454,
+    "sha256": "76aae68eb2e606a9087adf35d3f41d7c2aa73fcb4849d56f425d7eeb7c6312f2"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0-benchmark/run.log",
+    "blob": "6152137d83c96aba83af4925e897b23fda906838",
+    "bytes": 2923,
+    "sha256": "e0187f91b43e52b2cc9dc193936f71f2179a397ce938fb470a2693057656ed2c"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/ci-eb47b0f0-faiss/member-faiss-results.xml",
+    "blob": "3b5dce28979e694867fc4c018411143ad6b16fc2",
+    "bytes": 1110,
+    "sha256": "5954291d81f311f56235ebc4fc307765953a49889925d58f0c7e7643442ad9b1"
+  },
+  {
+    "path": "temp-screenshots/memory-v2/pre-retention/member-v2-hybrid-qwen3.json",
+    "blob": "5d41bdd7486b8548cfa01d1d4c93db57488e5689",
+    "bytes": 197519,
+    "sha256": "a5221f7574ba8265bf81679b851c45a39fe4a9136ca6d49d5095b529f2abb12f"
   }
 ]
