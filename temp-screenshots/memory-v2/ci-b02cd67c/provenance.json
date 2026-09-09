@@ -1,0 +1,196 @@
+{
+  "pr_head": "b02cd67c08732b86e549973942a05e2638bf7976",
+  "ci_checkout": "bff23582600b7b444e75e9141207fc46c47b5558",
+  "run": 34333392423,
+  "artifact": 10097394058,
+  "artifact_name": "member-memory-ui-evidence",
+  "artifact_registry_sha256": "4eb879a722000850b31991be62d334fabbad220c21c968fa1716858babb0a314",
+  "scope": "Real dashboard and ephemeral gateway with synthetic data; no live provider or restart activation claim. Captures precede subsequent source repairs.",
+  "files": [
+    {
+      "path": "member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/legacy-member-memory-initialized.png",
+      "bytes": 100732,
+      "sha256": "f40ddf64870635b09519f982da830d77d8ec828cbd11e1c2965dff78fc74b9e3"
+    },
+    {
+      "path": "member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/legacy-member-memory-refusal.png",
+      "bytes": 91591,
+      "sha256": "28d54e27646b86b622bc319671e1ff6590615f45d2e81e6d10853341132e3dd6"
+    },
+    {
+      "path": "member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/member-memory-evidence.json",
+      "bytes": 446,
+      "sha256": "38e763c51349038492ac768820923d1f09f488deed1e52008608ead0d47247e9"
+    },
+    {
+      "path": "member-memory-a-legacy-con-adcce-alizes-empty-private-memory-chromium/member-memory-walkthrough.webm",
+      "bytes": 580371,
+      "sha256": "58c4c1601b9e94da20af069610ee4b3cfa3387a383f893357154dae47230429e"
+    },
+    {
+      "path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-evidence.json",
+      "bytes": 454,
+      "sha256": "44e00a5cac63fc2b12a38b9e3115b79e625c628e54bdc07616acbd60fa59403d"
+    },
+    {
+      "path": "member-memory-an-empty-pri-f7d36-rsisted-thread-after-reload-chromium/member-memory-walkthrough.webm",
+      "bytes": 286049,
+      "sha256": "49f7b0c11804200aa028366fc8c3c4a95581ec658c129e79abed6c30c57dc61d"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-copy-dialog.png",
+      "bytes": 99166,
+      "sha256": "b3dc98ad6673cb5cbb6472bcd673032ab031c4d4d3dbd6c0b6ef9ef1ba235d76"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-correction-preview.png",
+      "bytes": 91607,
+      "sha256": "b8528088679a5d2dfda28fd2a6be81e884d6f4f8ea4444dde780ca16c82a8c72"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-desktop.png",
+      "bytes": 113721,
+      "sha256": "6bca1a351c7d44f3c37a1e6e7fd33d34bfe8a65491aeafe70b5a486aa85aed63"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-details-desktop.png",
+      "bytes": 96532,
+      "sha256": "b7c19ddbceee571eb5dd90d9c20313adf8f11b6ceb542bb76fa24afbc230dd94"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-evidence.json",
+      "bytes": 441,
+      "sha256": "af9c33c5c7c0533dfa10c6f1395c7954a4feb4e71f82c6965c727541ddaf36c7"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-mobile.png",
+      "bytes": 57030,
+      "sha256": "b644052d789c054506bde223368a75e05b27706ca2be2d378e17804ae65920da"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-owner-empty.png",
+      "bytes": 102138,
+      "sha256": "c5d5bc17d3c77f39b71fe7e7bdb35ab14a59613531c7b39234b6935082d9f87f"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-profile.png",
+      "bytes": 102579,
+      "sha256": "5a35f6ec5e1d5ff66bf32567da227272622a1d424ed93983e942ce50c0ffb844"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-separate-empty-member.png",
+      "bytes": 102554,
+      "sha256": "9eedf32fd47ccdd80a6001ce0cb205ee1e3a4c4b4058fd31bf52320c95ec54c0"
+    },
+    {
+      "path": "member-memory-member-memor-783bf-anging-V1-or-another-member-chromium/member-memory-walkthrough.webm",
+      "bytes": 967153,
+      "sha256": "b091d171a3f96d6ba745a407713169a9ffb76f2365952cf8f53f1bce604cae8b"
+    },
+    {
+      "path": "member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-evidence.json",
+      "bytes": 445,
+      "sha256": "20c71ddbc50a1a21deb05fd5f3d43133830be42d23d3e000f718a34c26d2c54a"
+    },
+    {
+      "path": "member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-cancelled.png",
+      "bytes": 117844,
+      "sha256": "2b56ab66df0aaa95a3dc3317af4e014644deeca98820a50bc5be14c0a7d428e7"
+    },
+    {
+      "path": "member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-confirm.png",
+      "bytes": 121807,
+      "sha256": "ab40ceea5f32793a884e4487bf5b15e2d339335f67ca3abc8c6b57d3c1fec7d2"
+    },
+    {
+      "path": "member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-restore-pending.png",
+      "bytes": 118608,
+      "sha256": "6e81932ef2cd4de57c19611f8e606a94bb8b8222a849e7f1bebe76675380b81e"
+    },
+    {
+      "path": "member-memory-private-back-827cf-out-replacing-active-memory-chromium/member-memory-walkthrough.webm",
+      "bytes": 328108,
+      "sha256": "7a23031014a0fabdae48dc3f79827e439daf632d4629cec1d50512141a1f3cf5"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+      "bytes": 449,
+      "sha256": "ded07014bb782fc85a8ffe0ba1137222419e777177ee155672d3826a38a00c0f"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 824307,
+      "sha256": "fa4144043984a3bb531004c5e7c43cd19823b48973d58fc0f161bde9dc7da389"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-preview-mobile.png",
+      "bytes": 54534,
+      "sha256": "64d2a78fb7edeae4f603bc5bd324476aa8f11000c7c9ed070788269cf62db774"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-bulk-selection.png",
+      "bytes": 132640,
+      "sha256": "7f7b9f0bd1ebabafff30057bd7a04c745367886722e12910bc6d2c158b7b38ad"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-forget-preview-mobile.png",
+      "bytes": 57525,
+      "sha256": "83485591c80d431f961113753873e391a113817004e599155d62860873d1b0c5"
+    },
+    {
+      "path": "member-memory-V1-previews--606e4-ing-a-concurrent-correction-chromium/memory-v1-global-overview.png",
+      "bytes": 109916,
+      "sha256": "8e9e68964d1050e7b8cdb03cb8b0f469794ba3f348f37c9b428718de1a11b7f6"
+    },
+    {
+      "path": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-evidence.json",
+      "bytes": 425,
+      "sha256": "091342fd686245752fb663890e2eb7778aed6d06e67c018b22c6211e6610741c"
+    },
+    {
+      "path": "member-memory-V1-refuses-a-db66a-n-explicit-owner-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 514929,
+      "sha256": "510463df04586408c6e81e1ffed5456b9fd3717acbaf0eade67615c9e70b5790"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-evidence.json",
+      "bytes": 449,
+      "sha256": "86201e2f5489a9ae0d95ef5a9cb917a3d30e923237bd74da6c1ff8c1d97737f1"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/member-memory-walkthrough.webm",
+      "bytes": 706573,
+      "sha256": "303c368943512de6ea3ed4a62550c0aa919db7ffcb9b5c44723b2efe4a257ef8"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-preview-mobile.png",
+      "bytes": 54771,
+      "sha256": "5e3e58ba55b6c9e5a8ad9ee83c7c6bdb7652f6ecc491d21f54727dfbd5821a48"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-bulk-selection.png",
+      "bytes": 103509,
+      "sha256": "4173331057b7b6d2b6565384c2f9bcc11fb4db61d7d6086f285bf104804d10f0"
+    },
+    {
+      "path": "member-memory-V2-previews--5c660-ing-a-concurrent-correction-chromium/memory-v2-forget-preview-mobile.png",
+      "bytes": 58733,
+      "sha256": "bf1425aaec5f7d3788de2c4cb29ce7b68e16ff9e6f45804e4787304e295ba2de"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-evidence.json",
+      "bytes": 430,
+      "sha256": "a98d451b9f816358e9375f2368f86ddb92c3e93a2c357e43a1a8037fedf11a75"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-review-proposals.png",
+      "bytes": 99006,
+      "sha256": "682ad6bfd807724eaef62115e536a64b12a2fa3d10b3b747213d7f29026fc5f0"
+    },
+    {
+      "path": "member-memory-V2-reviews-p-67517--accepting-a-later-proposal-chromium/member-memory-walkthrough.webm",
+      "bytes": 972923,
+      "sha256": "183d97e5bb37fe8cba55c17ede1e4d20b73510e917448647eab229a2c88c3bdf"
+    }
+  ]
+}

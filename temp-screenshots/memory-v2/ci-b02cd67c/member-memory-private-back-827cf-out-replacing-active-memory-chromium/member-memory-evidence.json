@@ -1,0 +1,11 @@
+{
+  "title": "private backup staging survives navigation and can be cancelled without replacing active memory",
+  "status": "passed",
+  "expectedStatus": "passed",
+  "retry": 0,
+  "checkoutSha": "bff23582600b7b444e75e9141207fc46c47b5558",
+  "runId": "34333392423",
+  "runAttempt": "1",
+  "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+  "video": "member-memory-walkthrough.webm"
+}
