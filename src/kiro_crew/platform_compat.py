@@ -1951,6 +1951,38 @@ def process_descendants(pid: int) -> list[int]:
     return _descendants_from_parent_map(pid, parent_map)
 
 
+def created_after(child_token: str, parent_token: str) -> bool:
+    """Whether a process the parent map lists under another is really its child.
+
+    The Toolhelp snapshot behind :func:`process_descendants` records a parent as a
+    bare pid, and Windows keeps that number after the parent dies. When the dead
+    parent's pid is later recycled, an unrelated process appears as a child of the
+    recycler -- and, being unrelated, is often one this user cannot terminate, so
+    ending it fails and a caller that treats the set as a tree draws the wrong
+    conclusion in whichever direction hurts it (killing a stranger, or calling a
+    foreign listener its own).
+
+    A genuine child was created after its parent, while such a stray was created
+    while the pid still belonged to the process it was born under, so comparing the
+    creation identities separates the two exactly. Both tokens are the creation
+    ``FILETIME`` as decimal text (:func:`process_start_time`); a token that is not
+    (nothing on Windows produces one) is not attributable, and the caller must leave
+    that process alone rather than act on a guess.
+
+    Lives HERE, beside the primitive whose staleness it compensates for, because
+    three callers need the same rule and a second spelling of it is how they drift:
+    the pod backend's ``stop``, ``pod.runtime.port_owner``, and the test harness's
+    Windows teardown. :func:`descendant_termination_handles` is the stronger form --
+    exact per-process handles, every edge validated against creation AND exit times
+    across two snapshots -- and is the right answer for a caller that holds an exact
+    root handle; this is the token-only form for callers that do not.
+    """
+    try:
+        return int(child_token) > int(parent_token)
+    except ValueError:
+        return False
+
+
 def _windows_process_parent_map() -> dict[int, int]:
     """Return one Toolhelp PID -> PPID snapshot, raising if enumeration fails."""
 
