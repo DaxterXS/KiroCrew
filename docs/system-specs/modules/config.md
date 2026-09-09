@@ -170,6 +170,74 @@ Existing direct `config_dir()` callers are unchanged and keep the maintenance
 behaviour, including 25 pre-existing calls that already sit inside async
 handlers.
 
+### Kiro home of a non-default data home
+
+The agent specs kiro-cli reads live in `<kiro home>/agents`, and the default
+kiro home is the **machine-wide** `~/.kiro` — not under `KIROCREW_HOME`. Left
+alone, a gateway on a scratch or dev data home rebuilt the operator's shared
+`~/.kiro/agents/*.json` on boot and pinned its own home into every managed MCP
+server's `env` (`agent._managed_mcp_env`), so every `kirocrew-core` stub the
+REAL gateway's sessions spawned resolved `config_dir()` to the scratch home and
+every strict-identity tool was refused (#9690). Three pieces in `config/paths.py`
+close that, and the ownership question is answered in exactly one place:
+
+- **`foreign_data_home() -> Path | None`** — the data home this process runs on
+  iff it is NOT the operator's main one. `None` when `KIROCREW_HOME` is unset,
+  when it is an invalid override (`config_dir()` falls back to the default), and
+  when it merely re-spells the default `~/.kiro/crew` or the legacy `~/.kirocrew`
+  (`~`, trailing slash, `..` segments). The comparison is **lexical on both
+  sides** — the resolved `config_dir()` (already memoised by `ensure_data_home()`)
+  and the raw-normalised `KIROCREW_HOME` against the unresolved main homes — and
+  performs no filesystem work of its own, because it runs in the CLI prologue
+  before the gateway binds and a `resolve()` on a roaming/UNC home is a network
+  round-trip. Documented gap: a symlink alias of the default home under a
+  symlinked `$HOME` reads as foreign; spell the default literally or unset the
+  override.
+- **`isolated_kiro_home(data_home)` / `isolated_agents_dir(data_home)`** —
+  `<data home>/kiro` and `<data home>/kiro/agents`, the one recipe every isolated
+  instance uses (`pod/runtime.build_pod_env`, `testing/harness.py`, the GUI
+  user-test rig and the adoption below all spell it through these).
+- **`adopt_isolated_kiro_home() -> Path | None`** — called once from the CLI
+  prologue (`cli.main`, right after `ensure_data_home()` and logging setup; also
+  `mcp_gateway/gatewayd.main`). On a foreign data home with no VALID `KIRO_HOME`
+  it **rewrites the process environment**: `os.environ["KIRO_HOME"] =
+  <data home>/kiro`, then re-primes every already-loaded memo keyed on that
+  variable (`hooks._unc_agents_root` via `sys.modules`, so `paths` stays a
+  stdlib leaf and the first UNC-gate check does not pay the resolve on the event
+  loop). Because kiro-cli children are spawned with `{**os.environ}`, the
+  gateway, its kiro-cli processes, their `kirocrew mcp-*` stubs and every other
+  `kirocrew` verb on that home agree on one kiro home, and `kiro_agents_dir()` /
+  `kiro_sessions_dir()` follow it (session resume survives). It is
+  **filesystem-free** (pinned by `test_adoption_touches_no_filesystem`): whether
+  the adopted path is a real directory is judged by the write guard, not here. A
+  valid explicit `KIRO_HOME` is never overridden — including `KIRO_HOME=~/.kiro`,
+  the way a permanently relocated install keeps kiro-cli reading the host
+  steering/skills/transcripts, at the cost that its Kiro Crew MCP servers then
+  follow the DEFAULT instance's specs. An INVALID `KIRO_HOME` (system dir,
+  unresolvable, symlink cycle — `explicit_kiro_home()` applies `kiro_home()`'s
+  own test and treats a resolution error as unset) is replaced with a warning,
+  because the resolver would have discarded it and left the process on the
+  shared home anyway. The adoption is logged once at INFO with the opt-out;
+  `kirocrew doctor` (Data Home) reports the state and what the host `~/.kiro`
+  still holds.
+
+What follows `KIRO_HOME` and what does not: `kiro_agents_dir()` and
+`kiro_sessions_dir()` do; the host kiro-cli MCP registry (`~/.kiro/settings/mcp.json`,
+a merge input into the specs Kiro Crew writes, with `includeMcpJson` pinned off),
+`skills`, `hooks`, `steering` and `prompts` are still read from the host `~/.kiro`
+by the dashboard and by `agent.py`'s skill discovery, so a redirected kiro-cli
+loads its own copies of those while the dashboard shows the host ones. Routing
+them is #9816.
+
+Ownership on the write side is `agent._decline_shared_agent_home`: a foreign data
+home never writes the shared agents dir, regardless of environment variables (an
+env var is set by whoever launched the process, an agent included), and its
+private-target exemption requires the isolated path to be **link-free and
+directory-shaped** (`agent._private_isolated_agents_dir`) so a planted
+`<data home>/kiro -> ~/.kiro` cannot turn the shared dir into a "private" one.
+Only that guard may consult the override-blind `ambient_agents_dir()`
+(`test_only_the_ownership_guard_consults_the_ambient_agents_dir`).
+
 ## Workspace Root
 
 `workspace_root()` returns the base directory for all LLM working directories (kiro-cli cwd, task runner output, etc.):
@@ -557,14 +625,23 @@ a per-agent model pin (per-agent pin > global default). Reads only the kiro
 `kiro_agents_dir()`.
 
 ### `kiro_agents_dir() -> Path` (`config/paths.py`)
-Leaf helper returning `~/.kiro/agents` — the **user-level** scope. Lives in the leaf
-module so `loader.py` (and `_resolve_named_agent_model`'s `agents_dir` DI seam) can
-locate installed agent JSONs without importing `kiro_crew.agent` — which imports
-`config.loader` and would create an import cycle.
+Leaf helper returning `<kiro home>/agents` — the **user-level** scope, where the kiro
+home is `kiro_home()`: `$KIRO_HOME` when set and valid, else `~/.kiro`. On a
+non-default data home the CLI prologue sets `KIRO_HOME=<data home>/kiro`
+([above](#kiro-home-of-a-non-default-data-home)), so there this resolves to
+`isolated_agents_dir(<data home>)`; only the default-home instance resolves the
+machine-wide `~/.kiro/agents`. Lives in the leaf module so `loader.py` (and
+`_resolve_named_agent_model`'s `agents_dir` DI seam) can locate installed agent
+JSONs without importing `kiro_crew.agent` — which imports `config.loader` and
+would create an import cycle.
 
 Deliberately **single-valued**: it is the WRITE target as well as a read scope
 (`bridges._register_agents` and `agent.rebuild_agent_config` both write here), so it
-is never widened into a search path.
+is never widened into a search path. Writes to the machine-wide directory are
+gated by `agent._decline_shared_agent_home` (a non-default data home, a linked
+worktree, a temp-dir checkout and a pod are all refused and use the existing specs
+read-only). `ambient_agents_dir()` is the override-blind twin that only that
+guard may consult.
 
 ### `project_agents_dir(project_dir)` / `project_kiro_dir(project_dir)` (`config/paths.py`)
 The **project** scope, read-only: `<project>/.kiro/agents` (kiro-cli's own workspace
@@ -1549,6 +1626,7 @@ Returns the effective config for a channel:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `KIROCREW_HOME` | Override config/data directory | `~/.kiro/crew` |
+| `KIRO_HOME` | kiro-cli's own home (agents, sessions, steering, skills, settings). Read, never required: on a non-default `KIROCREW_HOME` the CLI prologue exports `<data home>/kiro` when unset or invalid ([details](#kiro-home-of-a-non-default-data-home)); a valid explicit value is honoured as-is | `~/.kiro` |
 | `KIROCREW_PORT` | Override dashboard port (dev mode — run dev + prod side by side) | `5476` |
 | `KIROCREW_WORKSPACE` | Override workspace root directory | Platform-dependent |
 | `KIROCREW_PROJECT_DIR` | Override agent config/skills directory | Auto-detected |
