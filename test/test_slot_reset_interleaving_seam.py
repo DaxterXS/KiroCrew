@@ -580,3 +580,228 @@ class TestReloadRacesSwitchCommitResetSpan:
             "reset:post_pop",
         ]
         assert state.sessions.reset.await_count == 2
+
+
+class TestReloadRefusesAnAliasColdStartOnTheSharedSession:
+    """The alias cold-start guard.
+
+    A reload's turn-in-flight guard is SESSION-scoped, not slot-scoped: the
+    session can be shared by an alias slot, whose cold-starting first turn is
+    invisible to THIS slot's ``slot.running`` (a different object) and to
+    ``get_provider`` (``provider.start()`` has not registered a session yet).
+    ``session_key in state.running_session_keys()`` is what sees it -- the set
+    folds every slot through effective_session_key. Without it, reload tears
+    down a session a sibling is mid-cold-start on and returns 200; the sibling
+    then registers its pre-reload provider with stale config.
+    """
+
+    @pytest.mark.asyncio
+    async def test_running_turn_on_the_shared_session_refuses_reload(
+        self, state, slot, monkeypatch
+    ):
+        # No turn on THIS slot (fresh fixture slot: task is None -> running
+        # False) and no registered provider -- the two probes that would
+        # otherwise catch a turn. Only the session-scoped set knows an alias
+        # slot is cold-starting a turn on the shared key.
+        state.sessions.get_provider = MagicMock(return_value=None)
+        state.running_session_keys = MagicMock(return_value=frozenset({_SESSION_KEY}))
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+            data = await resp.json()
+
+        # Reverting the session-scoped clause lets reload fall through to reset +
+        # 200 and reddens this on the status assertion.
+        assert resp.status == 409
+        assert data["code"] == "turn_in_flight"
+        # The teardown must NOT have run -- refused before reset.
+        state.sessions.reset.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_running_session_reloads_normally(self, state, slot, monkeypatch):
+        """Control: an empty running set lets reload proceed to 200."""
+        state.sessions.get_provider = MagicMock(return_value=_idle_provider())
+        state.running_session_keys = MagicMock(return_value=frozenset())
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+
+        assert resp.status == 200
+        state.sessions.reset.assert_awaited_once_with(_SESSION_KEY, skip_if_busy=True)
+
+
+class TestReloadCancelsInFlightEagerSpawnBeforeReset:
+    """Reload cancels the slot's in-flight eager-spawn before tearing down.
+
+    ``schedule_eager_spawn`` cancels the slot's prior ``_eager_spawn_task`` as a
+    side effect of scheduling a new one. Reload SUPPRESSES that call for a linked
+    session, so a focus prefetch already mid-handshake from an earlier signal
+    would otherwise survive the teardown and register an old-config session AFTER
+    the reload reported success. Reload now cancels AND awaits the task before the
+    reset. Reverting the cancel leaves the task pending after reload and reddens
+    the assertion below.
+    """
+
+    @pytest.mark.asyncio
+    async def test_in_flight_eager_task_is_cancelled_and_awaited_before_reset(
+        self, state, slot, monkeypatch
+    ):
+        # A linked session, so reload takes the suppression branch and does NOT
+        # schedule a replacement spawn -- the only cancellation is the explicit
+        # pre-reset one under test.
+        slot.linked_session_key = _SESSION_KEY
+
+        started = asyncio.Event()
+        settled = {"cancelled": False}
+
+        async def _never_finishes() -> None:
+            # Stands in for an eager prefetch mid-handshake: runnable, not done,
+            # until cancelled.
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                settled["cancelled"] = True
+                raise
+
+        eager = asyncio.get_event_loop().create_task(_never_finishes())
+        await started.wait()  # ensure it is genuinely in flight, not just created
+        slot._eager_spawn_task = eager
+
+        # Order probe: the reset must run only AFTER the eager task has settled.
+        order: list[str] = []
+        orig_reset = state.sessions.reset
+
+        async def _record_reset(*a, **k):
+            order.append(f"reset:eager_done={eager.done()}")
+            return await orig_reset(*a, **k)
+
+        state.sessions.reset = _record_reset
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+
+        assert resp.status == 200
+        # Reverting the pre-reset cancel leaves this False (task still pending).
+        assert eager.done(), "in-flight eager task was not cancelled by reload"
+        assert eager.cancelled() or settled["cancelled"]
+        # And it was settled BEFORE the reset ran, not concurrently.
+        assert order == ["reset:eager_done=True"]
+
+
+class TestReloadRechecksTurnStateAfterEagerCancelAwait:
+    """A turn starting DURING the eager-cancel await is caught before the reset.
+
+    The eager cancel+await is the only real suspension point between resolving the
+    session and the reset. If the turn-in-flight guard ran BEFORE that await, a
+    send could start a turn (and post an approval card) during it, and
+    ``_reset_slot_session`` runs ``_unblock_pending_waits`` unconditionally --
+    before its ``skip_if_busy`` decline -- so the card would be discarded even as
+    the reset then declines and answers 409. Placing the eager cancel+await BEFORE
+    the guard, with no await between the guard and the reset, keeps the guard's
+    answer true at teardown. Reverting to guard-before-await lets the reset run and
+    reddens the ``reset.assert_not_awaited()`` below.
+    """
+
+    @pytest.mark.asyncio
+    async def test_turn_appearing_during_eager_await_answers_409_without_reset(
+        self, state, slot, monkeypatch
+    ):
+        started = asyncio.Event()
+
+        async def _turn_appears_mid_cancel() -> None:
+            # Stands in for an in-flight eager prefetch. When reload cancels+awaits
+            # it, a turn becomes visible on the session before control returns to
+            # the guard -- exactly the window under test.
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # The turn is now in flight on the shared session key.
+                state.running_session_keys = MagicMock(return_value=frozenset({_SESSION_KEY}))
+                raise
+
+        eager = asyncio.get_event_loop().create_task(_turn_appears_mid_cancel())
+        await started.wait()
+        slot._eager_spawn_task = eager
+        # Guard reads empty until the cancel above flips it.
+        state.running_session_keys = MagicMock(return_value=frozenset())
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+            data = await resp.json()
+
+        assert resp.status == 409
+        assert data["code"] == "turn_in_flight"
+        # The teardown must NOT have run: the guard, read AFTER the await, saw the
+        # turn. Guard-before-await would miss it and reach the reset.
+        state.sessions.reset.assert_not_awaited()
+
+
+class TestReloadRevalidatesSlotIdentityAfterEagerCancel:
+    """A same-name slot replacement during the cancel-await answers 404.
+
+    ``slot`` is resolved from ``state._slots`` before this handler takes any lock,
+    and ``close_slot`` pops that mapping WITHOUT taking ``slot._lock``. So a
+    same-name delete can complete while reload holds the old slot's lock, and a
+    recreate can bind a NEW slot to the same session key. The app-ownership check
+    was decided against the slot read before the suspension, so proceeding would
+    apply that authorization to a different owner's session and tear down the
+    replacement's idle session. Reload revalidates the registry entry by IDENTITY
+    after the await and answers the same indistinguishable 404 a missing slot
+    gets. Dropping the identity check lets the teardown run and reddens the
+    assertions below.
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_name_replacement_during_cancel_await_answers_404(
+        self, state, slot, monkeypatch
+    ):
+        started = asyncio.Event()
+        replacement = _ChatSlot(_SLOT)
+
+        async def _replace_slot_mid_cancel() -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # A same-name delete + recreate lands while reload is suspended:
+                # the registry entry is now a DIFFERENT object under the same key.
+                state._slots[_SLOT] = replacement
+                raise
+
+        eager = asyncio.get_event_loop().create_task(_replace_slot_mid_cancel())
+        await started.wait()
+        slot._eager_spawn_task = eager
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+            data = await resp.json()
+
+        # The replacement really did take the name.
+        assert state._slots[_SLOT] is replacement
+        # Identity, not presence: a slot IS registered under this name, so a
+        # presence test would pass here and the teardown would proceed.
+        assert resp.status == 404
+        assert data["code"] == "slot_not_found"
+        # The replacement owner's session must be untouched.
+        state.sessions.reset.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unreplaced_slot_reloads_normally(self, state, slot, monkeypatch):
+        """Control: the same registry entry after the await proceeds to 200."""
+        started = asyncio.Event()
+
+        async def _plain_prefetch() -> None:
+            started.set()
+            await asyncio.Event().wait()
+
+        eager = asyncio.get_event_loop().create_task(_plain_prefetch())
+        await started.wait()
+        slot._eager_spawn_task = eager
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(f"/api/chat/slots/{_SLOT}/reload")
+
+        assert resp.status == 200
+        state.sessions.reset.assert_awaited_once_with(_SESSION_KEY, skip_if_busy=True)
