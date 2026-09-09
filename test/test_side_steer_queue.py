@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from chat_test_helpers import _make_state
+from chat_test_helpers import _make_state, stub_readonly_spec_publisher
 
 from kiro_crew.dashboard.handlers.side import (
     api_side_close,
@@ -38,6 +38,13 @@ from kiro_crew.dashboard.handlers.side import (
 from kiro_crew.dashboard.side_state import MAX_SIDE_QUEUE, SideState
 from kiro_crew.dashboard.ws import broadcast_side_queue, broadcast_side_result
 from kiro_crew.kiro_prerequisite import KiroPrerequisiteService
+
+
+@pytest.fixture(autouse=True)
+def _published_readonly_spec(monkeypatch):
+    """This suite drives the REAL ``_run_side_turn``; see
+    ``chat_test_helpers.stub_readonly_spec_publisher``."""
+    return stub_readonly_spec_publisher(monkeypatch)
 
 
 class _ReadyKiroPrerequisiteService(KiroPrerequisiteService):

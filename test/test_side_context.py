@@ -29,18 +29,25 @@ def _msg(role, content):
 
 
 def test_side_prompt_states_the_tool_boundary_without_fake_remediation():
-    """An explicit tool request is still unavailable and must point to main chat.
+    """The prompt describes the boundary the execution path enforces.
 
-    The old prompt said tool calls were permitted when explicitly requested while
-    the execution path unconditionally used ``REJECT_ALL``. That contradiction
-    made the model claim an MCP was unconfigured and suggest enabling it.
+    The turn runs under ``ToolApprovalPolicy.READ_ONLY``: reads run without
+    asking, everything that changes state is refused. The prompt must say the
+    same thing — a prompt that forbids every tool makes a compliant model
+    redirect a read-backed question to the main chat instead of reading, and a
+    prompt that permits more than the gate does makes the model claim a tool
+    is unconfigured and suggest enabling it. An explicit request for a change
+    is still refused and must point to the main chat.
     """
     prompt = sc.build_side_message(_slot([]), "use Builder MCP", is_first_turn=True)
 
-    assert "tool and MCP execution is unavailable here" in prompt
-    assert "even when the user explicitly requests it" in prompt
-    assert "ask in the main chat" in prompt
+    assert "lookups work here, but changes don't" in prompt
+    assert "run without asking" in prompt
+    assert "MCP tools are refused here" in prompt
+    assert "even when the user explicitly requests them" in prompt
+    assert "use the main chat to take action" in prompt
     assert "Never claim that a tool is unconfigured" in prompt
+    assert "tool and MCP execution is unavailable" not in prompt
     assert "Do not emit tool calls" not in prompt
 
 
