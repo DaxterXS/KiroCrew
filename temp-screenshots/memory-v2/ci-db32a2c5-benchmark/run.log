@@ -1,0 +1,78 @@
+{
+  "full_vectors": {
+    "admission": {
+      "tp": 93,
+      "fp": 5,
+      "fn": 7,
+      "tn": 4895,
+      "precision": 0.9489795918367347,
+      "recall": 0.93
+    },
+    "quality": {
+      "ranked": {
+        "precision_returned": 0.9433333333333332,
+        "fragment_recall": 0.93,
+        "topic_hit": 0.98,
+        "ndcg_at_8": 0.9319720789148188
+      },
+      "context": {
+        "precision_returned": 0.9433333333333332,
+        "fragment_recall": 0.93,
+        "topic_hit": 0.98,
+        "ndcg_at_8": 0.9319720789148188
+      }
+    },
+    "bounds": true
+  },
+  "short_vectors_missing": {
+    "admission": {
+      "tp": 73,
+      "fp": 5,
+      "fn": 27,
+      "tn": 4895,
+      "precision": 0.9358974358974359,
+      "recall": 0.73
+    },
+    "quality": {
+      "ranked": {
+        "precision_returned": 0.9166666666666667,
+        "fragment_recall": 0.73,
+        "topic_hit": 0.96,
+        "ndcg_at_8": 0.7697847648168016
+      },
+      "context": {
+        "precision_returned": 0.9166666666666667,
+        "fragment_recall": 0.73,
+        "topic_hit": 0.96,
+        "ndcg_at_8": 0.7697847648168016
+      }
+    },
+    "bounds": true
+  },
+  "no_embeddings": {
+    "admission": {
+      "tp": 56,
+      "fp": 5,
+      "fn": 44,
+      "tn": 4895,
+      "precision": 0.9180327868852459,
+      "recall": 0.56
+    },
+    "quality": {
+      "ranked": {
+        "precision_returned": 0.7133333333333333,
+        "fragment_recall": 0.56,
+        "topic_hit": 0.74,
+        "ndcg_at_8": 0.5962071016849467
+      },
+      "context": {
+        "precision_returned": 0.7133333333333333,
+        "fragment_recall": 0.56,
+        "topic_hit": 0.74,
+        "ndcg_at_8": 0.5962071016849467
+      }
+    },
+    "bounds": true
+  }
+}
+{"zh": {"episode_hit": true, "fact_hit": true, "within_budget": true}, "ja": {"episode_hit": true, "fact_hit": true, "within_budget": true}, "ko": {"episode_hit": true, "fact_hit": true, "within_budget": true}, "bounded_oversized_isolated": {"passed": true, "checks": {"selected": true, "nonempty_text": true, "text_truncated": true, "rendered_id": true, "total_chars_matches": true, "within_context_cap": true, "within_transport_budget": true, "transport_retained_id": true}, "selected_ids": ["oversized"], "selected_count": 1, "total_chars": 200, "actual_chars": 200, "context_cap": 200, "transport_bytes": 2762, "transport_byte_cap": 16384, "transport_selected_ids": ["oversized"]}, "bounded_oversized": {"passed": true, "checks": {"selected": true, "nonempty_text": true, "text_truncated": true, "rendered_id": true, "total_chars_matches": true, "within_context_cap": true, "within_transport_budget": true, "transport_retained_id": true}, "selected_ids": ["oversized"], "selected_count": 1, "total_chars": 200, "actual_chars": 200, "context_cap": 200, "transport_bytes": 2762, "transport_byte_cap": 16384, "transport_selected_ids": ["oversized"]}, "forgotten_excluded": {"passed": true}}

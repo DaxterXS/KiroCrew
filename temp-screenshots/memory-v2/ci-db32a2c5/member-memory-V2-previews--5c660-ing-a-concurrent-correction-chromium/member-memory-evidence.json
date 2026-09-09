@@ -1,0 +1,11 @@
+{
+  "title": "V2 previews and atomically edits 65 email memories across pages, preserving a concurrent correction",
+  "status": "passed",
+  "expectedStatus": "passed",
+  "retry": 0,
+  "checkoutSha": "fe37d515a82568863e4eb924e58a0250d14f972c",
+  "runId": "34356560737",
+  "runAttempt": "1",
+  "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+  "video": "member-memory-walkthrough.webm"
+}

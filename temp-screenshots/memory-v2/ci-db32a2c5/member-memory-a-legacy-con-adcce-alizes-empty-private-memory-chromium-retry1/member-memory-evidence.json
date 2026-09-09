@@ -1,0 +1,11 @@
+{
+  "title": "a legacy configured default member refuses work until its owner initializes empty private memory",
+  "status": "failed",
+  "expectedStatus": "passed",
+  "retry": 1,
+  "checkoutSha": "fe37d515a82568863e4eb924e58a0250d14f972c",
+  "runId": "34356560737",
+  "runAttempt": "1",
+  "scope": "Real dashboard and ephemeral gateway, synthetic data; no live provider or restart activation claim.",
+  "video": "member-memory-walkthrough.webm"
+}
