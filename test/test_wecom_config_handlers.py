@@ -217,13 +217,17 @@ def test_env_line_paste_is_stripped(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_allow_all_users_save_and_strict_boolean(tmp_path: Path, monkeypatch) -> None:
-    """allow_all_users persists as a strict boolean; truthy strings rejected."""
+    """allow_all_users persists as a strict boolean; truthy strings rejected.
+
+    The flag is applied to the running transport by the config watcher, so the
+    save must NOT promise a restart the operator does not need.
+    """
     import kiro_crew.dashboard.handlers.messaging as mod
 
     (status_body, _env) = _client_put(mod, monkeypatch, tmp_path, {"allow_all_users": True})
     status, body = status_body
     assert status == 200
-    assert body["restart_required"] is True
+    assert body["restart_required"] is False
     cfg = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert cfg["wecom"]["allow_all_users"] is True
 
