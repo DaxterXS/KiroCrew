@@ -435,3 +435,155 @@ def test_a_source_file_the_copy_never_wrote_still_hashes_from_source(
     # nested.md not in the written set -> legitimately absent -> hashed from source, no refuse.
     h = mod._staged_tree_hash(staged, source, {"SKILL.md"})
     assert h  # returns a hash rather than raising
+
+
+# ---------------------------------------------------------------------------
+# The staged-only walk in ``_staged_tree_hash`` hashes the SHIPPING tree, so an
+# entry it cannot hash is REFUSED, not skipped -- the same subset-of-what-ships
+# hole the bundle digest closes. A clean tree of directories and regular files
+# still hashes (pin-equality preserved by the tests above).
+# ---------------------------------------------------------------------------
+@_posix_only
+def test_staged_tree_hash_refuses_a_staged_only_symlink(tmp_path: pathlib.Path) -> None:
+    """A symlink present in staging but absent from the source is refused, not passed over."""
+    mod = load_build()
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "SKILL.md").write_text("reviewed\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "SKILL.md").write_text("reviewed\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("ATTACKER\n", encoding="utf-8")
+    (staged / "EXTRA.md").symlink_to(outside)
+
+    with pytest.raises(mod.ExportRefused) as caught:
+        mod._staged_tree_hash(staged, source, {"SKILL.md"})
+    assert "EXTRA.md" in str(caught.value)
+
+
+@_posix_only
+def test_staged_tree_hash_refuses_a_staged_only_special_file(tmp_path: pathlib.Path) -> None:
+    """A special file in the staged tree cannot be hashed and is refused, not skipped."""
+    mod = load_build()
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "SKILL.md").write_text("reviewed\n", encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "SKILL.md").write_text("reviewed\n", encoding="utf-8")
+    os.mkfifo(staged / "pipe")
+
+    with pytest.raises(mod.ExportRefused) as caught:
+        mod._staged_tree_hash(staged, source, {"SKILL.md"})
+    assert "pipe" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# The report is PUBLISHED with no-replace semantics: an exclusive hard link that
+# fails on a collision rather than overwriting a file a concurrent process put at
+# the path. Every refusal leaves both the destination and the staged report
+# recoverable, so a raise here is never destructive.
+# ---------------------------------------------------------------------------
+def _report_paths(mod, d: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    report_path = d / "bundle.smc-bundle.json"
+    report_tmp = d / (report_path.name + f".{mod._RUN_ID}.tmp")
+    return report_path, report_tmp
+
+
+@_posix_only
+def test_publish_report_refuses_a_collision_and_leaves_both_recoverable(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A foreign file at the report path is refused; it survives and the staged report is kept."""
+    mod = load_build()
+    d = tmp_path / "out"
+    d.mkdir()
+    report_path, report_tmp = _report_paths(mod, d)
+    report_path.write_text("FOREIGN\n", encoding="utf-8")
+    report_tmp.write_text("NEW\n", encoding="utf-8")
+
+    with pytest.raises(mod.ExportRefused):
+        mod._publish_report(report_tmp, report_path, None)
+
+    assert report_path.read_text(encoding="utf-8") == "FOREIGN\n", "the existing file was clobbered"
+    assert report_tmp.read_text(encoding="utf-8") == "NEW\n", "the staged report was lost"
+
+
+@_posix_only
+def test_publish_report_publishes_onto_an_absent_path(tmp_path: pathlib.Path) -> None:
+    """Non-vacuity: a clean install writes the report and clears the temp."""
+    mod = load_build()
+    d = tmp_path / "out"
+    d.mkdir()
+    report_path, report_tmp = _report_paths(mod, d)
+    report_tmp.write_text("NEW\n", encoding="utf-8")
+
+    mod._publish_report(report_tmp, report_path, None)
+
+    assert report_path.read_text(encoding="utf-8") == "NEW\n"
+    assert not report_tmp.exists(), "the run-id temp was left behind"
+
+
+@_posix_only
+def test_publish_report_replaces_our_own_verified_prior_report(tmp_path: pathlib.Path) -> None:
+    """Non-vacuity: a rebuild over this build's own prior report publishes and leaves no aside."""
+    mod = load_build()
+    d = tmp_path / "out"
+    d.mkdir()
+    report_path, report_tmp = _report_paths(mod, d)
+    prior = b"PRIOR\n"
+    report_path.write_bytes(prior)
+    report_tmp.write_text("NEW\n", encoding="utf-8")
+
+    mod._publish_report(report_tmp, report_path, prior)
+
+    assert report_path.read_text(encoding="utf-8") == "NEW\n"
+    assert not report_tmp.exists()
+    assert not list(d.glob("*.prev")), "the aside copy of the prior report was left behind"
+
+
+@_posix_only
+def test_MUTATION_no_replace_is_load_bearing_on_a_racing_creation(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that appears AFTER the check must be refused, not clobbered.
+
+    The install step is reached with the destination reported ABSENT at the check (``lstat``
+    is forced to raise ``FileNotFoundError`` for the leaf) while a file really sits there --
+    the concurrent-creation race the drift check cannot see. The exclusive link answers it
+    with ``FileExistsError`` and refuses; reverting the link to a plain replace overwrites the
+    racer's file.
+    """
+    pristine_lstat = os.lstat
+
+    def fake_lstat(path, *a, **k):
+        if path == "bundle.smc-bundle.json" and k.get("dir_fd") is not None:
+            raise FileNotFoundError()
+        return pristine_lstat(path, *a, **k)
+
+    monkeypatch.setattr(os, "lstat", fake_lstat)
+
+    def stage(mod, name: str) -> tuple[pathlib.Path, pathlib.Path]:
+        d = tmp_path / name
+        d.mkdir()
+        report_path, report_tmp = _report_paths(mod, d)
+        report_path.write_text("RACER\n", encoding="utf-8")
+        report_tmp.write_text("NEW\n", encoding="utf-8")
+        return report_path, report_tmp
+
+    real = load_build()
+    rp, rt = stage(real, "real")
+    with pytest.raises(real.ExportRefused):
+        real._publish_report(rt, rp, None)
+    assert rp.read_text(encoding="utf-8") == "RACER\n", "the exclusive link must not clobber"
+
+    mut = load_build(
+        mutate=(
+            "os.link(tmp_name, leaf_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)",
+            "os.replace(tmp_name, leaf_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)",
+        )
+    )
+    rp2, rt2 = stage(mut, "mut")
+    mut._publish_report(rt2, rp2, None)
+    assert rp2.read_text(encoding="utf-8") == "NEW\n", "a by-name replace clobbers the racer"
