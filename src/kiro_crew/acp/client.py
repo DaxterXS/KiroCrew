@@ -1683,6 +1683,10 @@ class AcpError(Exception):
             self.rejected_model: str | None = None
         if not hasattr(self, "advertised"):
             self.advertised: list[str] = []
+        # Sign-in failure tag, set by :func:`_raise_acp_error` when the raw frame
+        # is a session-expiry / rejected-credential answer, so the dashboard's
+        # error row can offer the Kiro sign-in card instead of a retry.
+        self.auth_required: bool = False
 
 
 class AcpTimeoutError(AcpError):
@@ -2744,6 +2748,19 @@ def _raise_acp_error(
     if rejected:
         err.rejected_model = rejected
         err.advertised = list(available_models or [])
+    # Tag a session-expiry / rejected-credential answer so the dashboard can offer
+    # the fix -- the Kiro sign-in card -- instead of a Continue that hits the same
+    # wall. Decided from the raw frame, never from the prose, and only when the
+    # formatter would have reached its sign-in branch: a Bedrock-named credential
+    # exception (`_RE_AUTH`, a different remedy) or a usage-limit answer that
+    # happens to carry a 401/403 is not a Kiro sign-in problem.
+    if (
+        not rejected
+        and _is_session_expired(raw_data)
+        and not _RE_AUTH.search(raw_data)
+        and not _RE_USAGE_LIMIT.search(raw_data)
+    ):
+        err.auth_required = True
     raise err
 
 

@@ -16,6 +16,7 @@ from kiro_crew.auth.service import (
     KasLoginService,
     LoopbackUnavailableError,
     MissingStartUrlError,
+    UnknownIdentityError,
     UnknownLoginError,
 )
 from kiro_crew.auth.store import TokenStore, TokenStoreError
@@ -136,12 +137,22 @@ async def api_kas_login_begin_device(request: web.Request) -> web.Response:
     provider = str((body or {}).get("provider") or "")
     start_url = str((body or {}).get("start_url") or "")
     region = str((body or {}).get("region") or "")
+    # The identity slot a signed-in user is switching away from; removed by the
+    # service once THIS login's credential has landed, never before.
+    replaces = str((body or {}).get("replaces") or "")
     if not provider:
         return web.json_response(
             {"error": "Missing 'provider'.", "code": "invalid_provider"}, status=400
         )
     try:
-        result = await service.begin_device(provider, start_url=start_url, region=region)
+        result = await service.begin_device(
+            provider, start_url=start_url, region=region, replaces=replaces
+        )
+    except UnknownIdentityError:
+        return web.json_response(
+            {"error": f"Unknown identity: {replaces}", "code": "invalid_identity"},
+            status=400,
+        )
     except ValueError:
         return web.json_response(
             {"error": f"Unknown provider: {provider}", "code": "invalid_provider"},
@@ -293,12 +304,18 @@ async def api_kas_login_begin_loopback(request: web.Request) -> web.Response:
         return _unavailable()
     body = await _read_json(request)
     provider = str((body or {}).get("provider") or "")
+    replaces = str((body or {}).get("replaces") or "")
     if not provider:
         return web.json_response(
             {"error": "Missing 'provider'.", "code": "invalid_provider"}, status=400
         )
     try:
-        result = await service.begin_loopback(provider)
+        result = await service.begin_loopback(provider, replaces=replaces)
+    except UnknownIdentityError:
+        return web.json_response(
+            {"error": f"Unknown identity: {replaces}", "code": "invalid_identity"},
+            status=400,
+        )
     except ValueError:
         return web.json_response(
             {"error": f"Unknown provider: {provider}", "code": "invalid_provider"},

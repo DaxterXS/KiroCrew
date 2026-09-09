@@ -14,7 +14,12 @@ import pytest
 
 from kiro_crew.auth.login import device
 from kiro_crew.auth.login.device import DeviceAuthorization
-from kiro_crew.auth.service import KasLoginService, UnknownLoginError, _parse_provider
+from kiro_crew.auth.service import (
+    KasLoginService,
+    UnknownIdentityError,
+    UnknownLoginError,
+    _parse_provider,
+)
 from kiro_crew.auth.store import KasToken, SocialProvider, TokenStore
 
 pytestmark = pytest.mark.asyncio
@@ -94,16 +99,22 @@ async def test_status_unauthenticated(tmp_path, monkeypatch):
         "provider": "",
         "identity": "",
         "transport": "device",
+        "expires_at": None,
+        "expired": False,
+        "has_refresh_token": False,
+        "refresh_rejected": False,
+        "usable": False,
     }
 
 
 async def test_status_reports_stored_token(tmp_path, monkeypatch):
     monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "loopback")
     store = TokenStore(tmp_path)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
     store.save(
         KasToken(
             access_token="at",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=expires,
             provider="Google",
             identity="social",
             profile_arn="arn:aws:x",
@@ -115,6 +126,65 @@ async def test_status_reports_stored_token(tmp_path, monkeypatch):
     assert status["provider"] == "Google"
     assert status["identity"] == "social"
     assert status["transport"] == "loopback"
+    # Token-free usability fields for the dashboard card: the access token is
+    # live, nothing renews it, nothing has been refused, and the shared predicate
+    # (KasToken.is_usable) says the identity can still answer a callback.
+    assert status["expires_at"] == expires.isoformat()
+    assert status["expired"] is False
+    assert status["has_refresh_token"] is False
+    assert status["refresh_rejected"] is False
+    assert status["usable"] is True
+    # Never the credential itself, under any spelling.
+    assert "access_token" not in status
+    assert "refresh_token" not in status
+    assert "at" not in status.values()
+
+
+async def test_status_reports_expired_without_refresh_as_unusable(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "device")
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            provider="Google",
+            identity="social",
+            profile_arn="arn:aws:x",
+        )
+    )
+    service = KasLoginService(store, session=_FakeSession())
+    status = await service.status()
+    # Still "authenticated" (something is stored) but the card must say it is
+    # not usable: expired access token and nothing to renew it with.
+    assert status["authenticated"] is True
+    assert status["expired"] is True
+    assert status["has_refresh_token"] is False
+    assert status["usable"] is False
+
+
+async def test_status_reports_issuer_rejection_without_flipping_usable(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "device")
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            provider="Google",
+            identity="social",
+            refresh_token="rt",
+            profile_arn="arn:aws:x",
+        )
+    )
+    store.mark_refresh_rejected("social")
+    service = KasLoginService(store, session=_FakeSession())
+    status = await service.status()
+    # The refusal is REPORTED so the card can say "sign in again"; `usable`
+    # still reflects the shared spawn-time predicate (a refresh token is
+    # present), because a lapsed Crew identity is surfaced, not silently
+    # demoted to kiro-cli's login.
+    assert status["refresh_rejected"] is True
+    assert status["has_refresh_token"] is True
+    assert status["usable"] is True
 
 
 async def test_begin_device_returns_public_fields_only(tmp_path, monkeypatch):
@@ -177,6 +247,109 @@ async def test_poll_authorized_saves_token_and_forgets(tmp_path, monkeypatch):
     assert token.access_token == "at-1"
     with pytest.raises(UnknownLoginError):
         await service.poll_device(login_id)
+
+
+def _authorized_google() -> _FakeResp:
+    return _FakeResp(
+        200,
+        {
+            "status": "authorized",
+            "accessToken": "at-new",
+            "refreshToken": "rt-new",
+            "profileArn": "arn:aws:profile/new",
+            "identityProvider": "google",
+            "expiresIn": 3600,
+        },
+    )
+
+
+def _stored_idc(tmp_path) -> TokenStore:
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at-idc",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            provider="Enterprise",
+            identity="identity_center",
+            profile_arn="arn:aws:profile/idc",
+        )
+    )
+    return store
+
+
+async def test_switching_account_removes_the_replaced_slot_after_the_new_one_lands(
+    tmp_path, monkeypatch
+):
+    """The store resolves by slot priority, not recency: a Google sign-in under a
+    still-stored Identity Center entry would leave the agents on the OLD account
+    while the card said the switch happened. Naming the slot being replaced makes
+    the switch real -- and only once the new credential is on disk."""
+    store = _stored_idc(tmp_path)
+    assert store.resolve().identity == "identity_center"
+    service = KasLoginService(store, session=_FakeSession([_authorized_google()]))
+
+    async def _fake_initiate(provider, *, session):
+        return _device_auth()
+
+    monkeypatch.setattr(device, "initiate_device_authorization", _fake_initiate)
+    login_id = (await service.begin_device("google", replaces="identity_center"))["login_id"]
+    # Nothing is removed at begin: an abandoned or failed sign-in leaves the
+    # previous account exactly as it was.
+    assert store.load("identity_center") is not None
+    result = await service.poll_device(login_id)
+    assert result["status"] == "authorized"
+    assert result["replaced"] == "identity_center"
+    assert store.load("identity_center") is None
+    assert store.resolve().identity == "social"
+    assert store.resolve().access_token == "at-new"
+
+
+async def test_replacing_the_same_slot_is_a_plain_overwrite(tmp_path, monkeypatch):
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at-old",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            provider="Github",
+            identity="social",
+            profile_arn="arn:aws:profile/old",
+        )
+    )
+    service = KasLoginService(store, session=_FakeSession([_authorized_google()]))
+
+    async def _fake_initiate(provider, *, session):
+        return _device_auth()
+
+    monkeypatch.setattr(device, "initiate_device_authorization", _fake_initiate)
+    login_id = (await service.begin_device("google", replaces="social"))["login_id"]
+    result = await service.poll_device(login_id)
+    assert result["status"] == "authorized"
+    assert "replaced" not in result  # same slot: the save already replaced it
+    assert store.resolve().access_token == "at-new"
+
+
+async def test_failed_switch_keeps_the_previous_account(tmp_path, monkeypatch):
+    store = _stored_idc(tmp_path)
+    service = KasLoginService(
+        store, session=_FakeSession([_FakeResp(200, {"status": "expired_token"})])
+    )
+
+    async def _fake_initiate(provider, *, session):
+        return _device_auth()
+
+    monkeypatch.setattr(device, "initiate_device_authorization", _fake_initiate)
+    login_id = (await service.begin_device("google", replaces="identity_center"))["login_id"]
+    result = await service.poll_device(login_id)
+    assert result["status"] != "authorized"
+    assert store.resolve().identity == "identity_center"
+
+
+async def test_begin_refuses_an_unknown_replaces_slot(tmp_path, monkeypatch):
+    service, _ = _service(tmp_path)
+    with pytest.raises(UnknownIdentityError):
+        await service.begin_device("google", replaces="../etc")
+    with pytest.raises(UnknownIdentityError):
+        await service.begin_loopback("google", replaces="nope")
 
 
 async def test_cancel_during_an_authorized_device_poll_never_persists(tmp_path, monkeypatch):
