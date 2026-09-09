@@ -1,0 +1,66 @@
+{
+  "source_head": "999116e39f4dbbe5994b67515967ae0ea76cdf17",
+  "kind": "Historical report presentation and historical eb47 UI selection; not a new measurement or current-UI validation",
+  "files": {
+    "docs/task-specs/2026/09/memory-v2/algorithm-effectiveness-report.html": {
+      "sha256": "a8a56a0b5f37949136d1638ecfc4a499ee064cc5512adaa306be4921cf7dd6f5",
+      "bytes": 188479,
+      "blob": "fc86ebb52f5a17f2f638bc34a80277cff2afd041"
+    },
+    "docs/task-specs/2026/09/memory-v2/algorithm-effectiveness-report.md": {
+      "sha256": "ba97c87ec911c9bb03848c922857fb54db7c4aec767c0e7545e02114fe965676",
+      "bytes": 56638,
+      "blob": "96a9c70572b7b3e11c7bc3b1d172f98469632ea4"
+    },
+    "docs/task-specs/2026/09/memory-v2/algorithm-admission-errors.svg": {
+      "sha256": "f1870706ece4c201ae7383066ddcfa80a71a57810665b7dc18f79a9daeb47c47",
+      "bytes": 48324,
+      "blob": "dfde96e4339cceb15ca2e62245930035d4704586"
+    },
+    "docs/task-specs/2026/09/memory-v2/algorithm-retrieval-quality.svg": {
+      "sha256": "7b310cd64ba793148a19229337edb88032c0f0c1a1e6195177e4f4d49af7b067",
+      "bytes": 67327,
+      "blob": "5040ca7ea3de1a95917abda13d52cd79eee68cc6"
+    },
+    "temp-screenshots/memory-v2/README.md": {
+      "sha256": "c618068e4eeb11ba0dd9bd8abf65b2bb8405f391a6f50246dba8a3aa0ac7579d",
+      "bytes": 1880,
+      "blob": "83f8f2d0b76550417b58cc491f5752c735481ae8"
+    },
+    "temp-screenshots/memory-v2/evidence.json": {
+      "sha256": "400bf6ea557157a60a07fb948ec128991045efce9274480e575656c5bb70ce48",
+      "bytes": 2084,
+      "blob": "030efca7fa3fab541d0d71a60ccbb58fb61c4985"
+    },
+    "temp-screenshots/memory-v2/member-memory-advanced-eb47.png": {
+      "sha256": "630cbb81178fe5738d9dca1287110c9bf0b775e2d8f1d25281d844bdd977abf3",
+      "bytes": 87197,
+      "blob": "fda177ce5b06a9ca413fd9265cecb379ad6ae317"
+    },
+    "temp-screenshots/memory-v2/member-memory-copy-eb47.png": {
+      "sha256": "eec7d69c9cb7ab3f7a3b3e36161e53b60be92fecaa6e2de2affe712207aa555e",
+      "bytes": 99428,
+      "blob": "5f91602bb3e549fee7734389e6f0c14ea93f99e3"
+    },
+    "temp-screenshots/memory-v2/member-memory-desktop-eb47.png": {
+      "sha256": "97548819c63e8fa19fb1eb02537a6b64a8925de2c9a0c874b01d23f5ab51c9cf",
+      "bytes": 111066,
+      "blob": "f8665bfd41589d6d8ec1102c86cd62413cfd3fae"
+    },
+    "temp-screenshots/memory-v2/member-memory-forget-mobile-eb47.png": {
+      "sha256": "5a74010f351ead50131bc86357ed0421a2fc868a6b99d2746ab08f88fb826c4c",
+      "bytes": 62141,
+      "blob": "27395b5ef5315d37e140c05279a7af340a715558"
+    },
+    "temp-screenshots/memory-v2/member-memory-initialize-eb47.png": {
+      "sha256": "b7aac48e16cd142376101a3d1b05361ce42c4eb515a65cafdb351923eb8669cd",
+      "bytes": 127032,
+      "blob": "5cc35ef1cc61e86b7bae3655aafac187c27eedcc"
+    },
+    "temp-screenshots/memory-v2/member-memory-restore-eb47.png": {
+      "sha256": "58384297be60f865f65f0a0555031a7c82508558bb3c4464c916c7c152adea0f",
+      "bytes": 116167,
+      "blob": "61ee147153375d3d410860324943797b6e76d529"
+    }
+  }
+}
