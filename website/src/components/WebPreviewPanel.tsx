@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Globe, RotateCw, ExternalLink, ArrowLeft, ArrowRight, Expand, Minimize, Smartphone, Monitor, Check, Crop, Play, Loader2, AlertTriangle, MoreHorizontal } from 'lucide-react'
+import { Globe, RotateCw, ExternalLink, ArrowLeft, ArrowRight, Expand, Minimize, Smartphone, Monitor, Check, Crop, Play, Loader2, AlertTriangle, MoreHorizontal, PenLine } from 'lucide-react'
 
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator,
 } from './ui/dropdown-menu'
+import SketchDialog, { type SketchBackground } from './SketchDialog'
 import { safeSetItem } from '../utils/safeStorage'
+import {
+  PREVIEW_ANNOTATE_EVENT, buildAnnotationFiles,
+  type AnnotationCaptureMeta, type SceneElementLike,
+} from '../utils/browserAnnotate'
 import { isScreenSnipSupported } from '../hooks/useScreenSnip'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useBrowserView } from '../hooks/useBrowserView'
@@ -469,6 +474,90 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
     setViewOverride(v => !(v ?? viewRunning))
   }, [viewRunning])
 
+  // ── Annotate ─────────────────────────────────────────────────────────────
+  // Screenshot the native view, let the user draw on it in the sketch pad, and
+  // hand the result to the chat with each mark mapped to the page element under
+  // it. Native-only by construction: the capture reads the in-process Chromium
+  // view (capturePage + the snapshot walker); the remote/CLI transport has no
+  // such view in this process, so the button is not rendered there.
+  const canAnnotate = nativeOpen && typeof window.browserAPI?.annotateCapture === 'function'
+  const [annotateBg, setAnnotateBg] = useState<SketchBackground | null>(null)
+  const [annotateOpen, setAnnotateOpen] = useState(false)
+  const [annotating, setAnnotating] = useState(false)
+  const [annotateError, setAnnotateError] = useState('')
+  /** Everything the capture knew about the page, kept for the send step. */
+  const annotateMeta = useRef<AnnotationCaptureMeta | null>(null)
+  const annotateBtnRef = useRef<HTMLButtonElement>(null)
+  const annotateDropTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const startAnnotate = useCallback(async () => {
+    const api = window.browserAPI
+    if (!sessionKey || !api?.annotateCapture || annotating) return
+    if (annotateDropTimer.current) clearTimeout(annotateDropTimer.current)
+    setAnnotating(true)
+    setAnnotateError('')
+    try {
+      const cap = await api.annotateCapture(sessionKey)
+      if (!cap || !cap.ok) {
+        // The main process answers with a reason (view gone, not painted yet,
+        // timed out); show it rather than a silent no-op on the button.
+        setAnnotateError(cap?.error || i18nT('components.webPreviewPanel.annotate_capture_failed'))
+        return
+      }
+      annotateMeta.current = {
+        elements: cap.elements,
+        url: cap.url,
+        title: cap.title,
+        cssWidth: cap.cssWidth,
+        cssHeight: cap.cssHeight,
+      }
+      setAnnotateBg({
+        dataUrl: `data:image/png;base64,${cap.png}`,
+        width: cap.cssWidth,
+        height: cap.cssHeight,
+        exportScale: cap.dpr,
+      })
+      setAnnotateOpen(true)
+    } catch (e) {
+      setAnnotateError(e instanceof Error && e.message ? e.message : i18nT('components.webPreviewPanel.annotate_capture_failed'))
+    } finally {
+      setAnnotating(false)
+    }
+  }, [sessionKey, annotating])
+
+  // A capture error is transient feedback next to the button, not a sticky
+  // banner: clear it once the user has had time to read it.
+  useEffect(() => {
+    if (!annotateError) return
+    const t = setTimeout(() => setAnnotateError(''), 6000)
+    return () => clearTimeout(t)
+  }, [annotateError])
+
+  /** Sketch pad "Send to chat": pair the PNG with the element-ref note and hand
+   *  both to ChatPage's upload pipeline via the window event. */
+  const sendAnnotation = useCallback((files: File[], scene?: { elements: readonly SceneElementLike[] }) => {
+    const png = files[0]
+    if (!png) return
+    const { files: out } = buildAnnotationFiles(png, scene?.elements ?? [], annotateMeta.current)
+    window.dispatchEvent(new CustomEvent(PREVIEW_ANNOTATE_EVENT, { detail: { slot: sessionKey, files: out } }))
+  }, [sessionKey])
+
+  const closeAnnotate = useCallback((next: boolean) => {
+    setAnnotateOpen(next)
+    if (annotateDropTimer.current) clearTimeout(annotateDropTimer.current)
+    if (!next) {
+      // Drop the capture once the close animation has run (dropping it in the
+      // same commit would flip the still-visible dialog into sketch mode for
+      // its fade-out). A stale screenshot must not be what the next open
+      // shows, and a viewport PNG is not worth holding in memory.
+      annotateDropTimer.current = setTimeout(() => {
+        annotateMeta.current = null
+        setAnnotateBg(null)
+      }, 300)
+    }
+  }, [])
+  useEffect(() => () => { if (annotateDropTimer.current) clearTimeout(annotateDropTimer.current) }, [])
+
   const persist = useCallback((u: string) => {
     if (storageKey && u) safeSetItem(storageKey, u)
   }, [storageKey])
@@ -816,6 +905,30 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
         <span className="shrink-0 text-[13px] font-medium text-text">{i18nT('components.webPreviewPanel.browser_live')}</span>
         <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--ok)' }} aria-hidden />
         <div className="flex-1" />
+        {annotateError && (
+          <span role="alert" className="text-[11px] text-danger truncate min-w-0 max-w-[260px]" title={annotateError}>
+            {annotateError}
+          </span>
+        )}
+        {/* Annotate: screenshot the page, draw on it, send it to chat with the
+            element under each mark. Lives on the native header (which had no
+            actions) rather than the preview toolbar, whose 4-control row is
+            capped. A labelled button, not an icon: the verb is new to users. */}
+        {canAnnotate && (
+          <button
+            ref={annotateBtnRef}
+            type="button"
+            onClick={() => { void startAnnotate() }}
+            disabled={annotating}
+            className="inline-flex items-center gap-1.5 h-6 px-2 rounded-md text-[12px] font-medium text-text bg-transparent border border-border hover:bg-bg-hover hover:border-border-strong transition-colors cursor-pointer shrink-0 disabled:opacity-60 disabled:cursor-default"
+            title={i18nT('components.webPreviewPanel.annotate_tooltip')}
+            aria-label={i18nT('components.webPreviewPanel.annotate_tooltip')}
+            data-testid="browser-annotate"
+          >
+            {annotating ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <PenLine size={13} aria-hidden />}
+            <span>{i18nT('components.webPreviewPanel.annotate')}</span>
+          </button>
+        )}
       </div>
       {/* Address bar. The preview subtree below (which owns the other URL form)
           is hidden while the native surface is up, so without this the user
@@ -1119,6 +1232,19 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
       </div>
       </div>
       {nativeOpen ? nativeSurface : showBrowserView ? browserView : null}
+      {/* Annotate editor. Mounted whenever a capture exists; opening a Radix
+          dialog also trips useNativeBrowser's overlay detection, which hides
+          the native view for the dialog's duration so the pad is not painted
+          over by the page it shows. */}
+      {annotateBg && (
+        <SketchDialog
+          open={annotateOpen}
+          onOpenChange={closeAnnotate}
+          onInsert={sendAnnotation}
+          background={annotateBg}
+          returnFocusRef={annotateBtnRef}
+        />
+      )}
     </div>
   )
 }

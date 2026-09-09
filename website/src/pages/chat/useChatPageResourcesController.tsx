@@ -13,6 +13,7 @@ import { api } from '../../api/client'
 import { useChatFileDrop } from '../../components/ChatDropOverlay'
 import { makeRelative } from '../../components/FilePickerMenu'
 import { PREVIEW_SNIP_EVENT } from '../../components/WebPreviewPanel'
+import { PREVIEW_ANNOTATE_EVENT } from '../../utils/browserAnnotate'
 import { useMessageSearch } from '../../hooks/useMessageSearch'
 import { usePanelTabDescriptors } from '../../hooks/panelTabRegistry'
 import {
@@ -751,6 +752,21 @@ export function useChatPageResourcesController({
     } catch { setUploadError(i18nT('pages.chatPage.upload_failed_check_file_type_and_size_max_50_mb')) }
     setUploading(false)
   }, [activeSlotRef, setUploadError, setUploadHint, setUploading, setPendingFiles, fileDrafts, saveDrafts, setResizedInfo])
+
+  // The Browser panel's Annotate editor hands over finished files (the
+  // annotated PNG + its element-ref note). Same attachments pipeline as a
+  // drop or a snip; the event names the slot whose panel produced it, so an
+  // annotation started in one session lands there even if the user has since
+  // switched (the panel is session-scoped, the composer is not).
+  useEffect(() => {
+    const onAnnotate = (e: Event) => {
+      const d = (e as CustomEvent<{ slot?: string; files?: File[] }>).detail
+      if (!d?.files?.length) return
+      void uploadFiles(d.files, d.slot || undefined)
+    }
+    window.addEventListener(PREVIEW_ANNOTATE_EVENT, onAnnotate)
+    return () => window.removeEventListener(PREVIEW_ANNOTATE_EVENT, onAnnotate)
+  }, [uploadFiles])
 
   // Deliver an optimize result to the session that started it when the user
   // navigated away before the request settled. ChatInput only calls this for

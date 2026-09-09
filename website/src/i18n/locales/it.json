@@ -7899,7 +7899,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "Questa dashboard viene servita tramite HTTPS, quindi il browser blocca l'incorporamento di un",
       "this_url_is_the_dashboard_s_own_server_which_ref": "Questo URL è il server della dashboard stessa, che rifiuta di essere incorporato. Inserisci invece l'URL di un server di sviluppo.",
       "web_preview": "Anteprima web",
-      "more_actions": "Altre azioni"
+      "more_actions": "Altre azioni",
+      "annotate": "Annota",
+      "annotate_tooltip": "Cattura questa pagina, disegnaci sopra e inviala alla chat con l’elemento sotto ogni segno",
+      "annotate_capture_failed": "Impossibile catturare la pagina — riprova"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "Solo agente — nessun contesto {{productName}} né MCP",
@@ -8182,7 +8185,12 @@
       "new_sketch": "Nuovo schizzo",
       "confirm_discard": "Elimina disegno",
       "already_attached": "Allegato — modifica la tela per disegnare di nuovo",
-      "load_failed": "Impossibile caricare il blocco schizzi: controlla la connessione e riapri"
+      "load_failed": "Impossibile caricare il blocco schizzi: controlla la connessione e riapri",
+      "annotate_title": "Annota screenshot",
+      "annotate_hint": "Ogni segno viene inviato con l’elemento di pagina sottostante — riquadra o indica con una freccia ciò che intendi",
+      "send_to_chat": "Invia alla chat",
+      "send_shortcut": "Invia alla chat (⌘↩ / Ctrl+Invio)",
+      "clear_marks": "Cancella segni"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "Massimo {{n}} elementi fissati alla barra laterale: rimuovine uno prima"

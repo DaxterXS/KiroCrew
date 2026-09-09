@@ -7677,7 +7677,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "このダッシュボードはHTTPSで提供されるため、ブラウザーは",
       "this_url_is_the_dashboard_s_own_server_which_ref": "この URL はダッシュボード自身のサーバーであり、埋め込みは許可されていません。代わりに開発サーバーの URL を入力してください。",
       "web_preview": "ウェブプレビュー",
-      "more_actions": "その他の操作"
+      "more_actions": "その他の操作",
+      "annotate": "注釈",
+      "annotate_tooltip": "このページを撮影して描き込み、各マークの下にある要素と一緒にチャットへ送ります",
+      "annotate_capture_failed": "ページを撮影できませんでした — もう一度お試しください"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "エージェントのみ — {{productName}} コンテキストまたは MCP なし",
@@ -7958,7 +7961,12 @@
       "new_sketch": "新規スケッチ",
       "confirm_discard": "描画を破棄",
       "already_attached": "添付済み — キャンバスを編集すると再度スケッチできます",
-      "load_failed": "スケッチパッドを読み込めませんでした。接続を確認して再度開いてください"
+      "load_failed": "スケッチパッドを読み込めませんでした。接続を確認して再度開いてください",
+      "annotate_title": "スクリーンショットに注釈",
+      "annotate_hint": "各マークはその下のページ要素と一緒に送信されます — 指したいものを枠や矢印で示してください",
+      "send_to_chat": "チャットに送信",
+      "send_shortcut": "チャットに送信（⌘↩ / Ctrl+Enter）",
+      "clear_marks": "マークを消去"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "サイドバーにピン留めできるのは最大 {{n}} 個です - まず1つ解除してください"

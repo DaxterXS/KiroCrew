@@ -16,6 +16,21 @@ vi.mock('../hooks/useScreenSnip', async (importOriginal) => {
 // stays real, so no other call site in this panel changes behaviour.
 const getBrowserView = vi.fn()
 const startBrowserView = vi.fn()
+// The Annotate editor is the sketch pad, whose Excalidraw chunk is ~1MB and
+// canvas-bound; stub it so the panel tests assert the hand-off (dialog shell +
+// background) without loading the library under jsdom.
+vi.mock('@excalidraw/excalidraw', async () => {
+  const React = await import('react')
+  return {
+    Excalidraw: () => React.createElement('div', { 'data-testid': 'fake-excalidraw' }),
+    exportToBlob: vi.fn(async () => new Blob([''], { type: 'image/png' })),
+    serializeAsJSON: vi.fn(() => '{}'),
+    restore: vi.fn((d: { elements?: unknown[] }) => ({ elements: d.elements ?? [], appState: {}, files: {} })),
+    convertToExcalidrawElements: vi.fn((s: object[]) => s),
+  }
+})
+vi.mock('@excalidraw/excalidraw/index.css', () => ({}))
+
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>()
   return {
@@ -753,5 +768,59 @@ describe('WebPreviewPanel — native browser transport', () => {
     // Unmount → close() DESTROYS.
     unmount()
     await waitFor(() => expect(api.close).toHaveBeenCalledWith('sess-1'))
+  })
+
+  // ── Annotate ──
+  // The button is native-only by construction (the capture reads the in-process
+  // view), so it must render exactly when a native view owns the panel AND the
+  // shell exposes the capture bridge -- and nowhere else.
+
+  it('shows Annotate only when a native view is open and the shell can capture it', async () => {
+    const api = installNativeBridge(true) as Record<string, unknown>
+    api.annotateCapture = vi.fn()
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    expect(await screen.findByTestId('browser-annotate')).toBeInTheDocument()
+    expect(screen.getByTestId('browser-annotate')).toHaveTextContent('Annotate')
+  })
+
+  it('hides Annotate on a shell without the capture bridge (older desktop) and with no native view', async () => {
+    installNativeBridge(true) // no annotateCapture on this bridge
+    const { unmount } = renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    await waitFor(() => expect(screen.queryByTitle('Live browser session')).toBeNull())
+    expect(screen.queryByTestId('browser-annotate')).toBeNull()
+    unmount()
+    // Native view NOT open (CLI transport): no button even with the bridge method.
+    const api = installNativeBridge(false) as Record<string, unknown>
+    api.annotateCapture = vi.fn()
+    getBrowserView.mockResolvedValue(RUNNING)
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-2" active />)
+    expect(await screen.findByTitle('Live browser session')).toBeInTheDocument()
+    expect(screen.queryByTestId('browser-annotate')).toBeNull()
+  })
+
+  it('clicking Annotate captures THIS panel and opens the editor over the screenshot', async () => {
+    const api = installNativeBridge(true) as Record<string, unknown>
+    const capture = vi.fn(async () => ({
+      ok: true, png: 'AAAA', width: 200, height: 100, cssWidth: 100, cssHeight: 50, dpr: 2,
+      url: 'https://example.com/', title: 'Example', elements: [],
+    }))
+    api.annotateCapture = capture
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    fireEvent.click(await screen.findByTestId('browser-annotate'))
+    await waitFor(() => expect(capture).toHaveBeenCalledWith('sess-1'))
+    // The editor is the sketch pad in annotate mode. Excalidraw itself is lazy
+    // and not loaded under jsdom; the dialog shell and its title are enough to
+    // prove the hand-off happened with the capture as background.
+    expect(await screen.findByTestId('annotate-dialog')).toBeInTheDocument()
+    expect(screen.getByText('Annotate screenshot')).toBeInTheDocument()
+  })
+
+  it('surfaces an answered capture failure next to the button instead of silently doing nothing', async () => {
+    const api = installNativeBridge(true) as Record<string, unknown>
+    api.annotateCapture = vi.fn(async () => ({ ok: false, code: 'capture_empty', error: 'the page has not painted yet -- try again' }))
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    fireEvent.click(await screen.findByTestId('browser-annotate'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('the page has not painted yet -- try again')
+    expect(screen.queryByTestId('annotate-dialog')).toBeNull()
   })
 })

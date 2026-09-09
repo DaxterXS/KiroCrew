@@ -7788,7 +7788,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "Dieses Dashboard wird über HTTPS bereitgestellt, daher blockiert der Browser das Einbetten eines",
       "this_url_is_the_dashboard_s_own_server_which_ref": "Diese URL ist der Server des Dashboards selbst, der das Einbetten ablehnt. Geben Sie stattdessen die URL eines Dev-Servers ein.",
       "web_preview": "Web-Vorschau",
-      "more_actions": "Weitere Aktionen"
+      "more_actions": "Weitere Aktionen",
+      "annotate": "Markieren",
+      "annotate_tooltip": "Seite aufnehmen, darauf zeichnen und mit dem Element unter jeder Markierung an den Chat senden",
+      "annotate_capture_failed": "Seite konnte nicht aufgenommen werden – bitte erneut versuchen"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "Nur Agent — kein {{productName}}-Kontext oder MCP",
@@ -8070,7 +8073,12 @@
       "new_sketch": "Neue Skizze",
       "confirm_discard": "Zeichnung verwerfen",
       "already_attached": "Angehängt — Canvas bearbeiten, um erneut zu skizzieren",
-      "load_failed": "Skizzenblock konnte nicht geladen werden – Verbindung prüfen und erneut öffnen"
+      "load_failed": "Skizzenblock konnte nicht geladen werden – Verbindung prüfen und erneut öffnen",
+      "annotate_title": "Screenshot markieren",
+      "annotate_hint": "Jede Markierung wird mit dem darunterliegenden Seitenelement gesendet – umrahme oder zeige mit einem Pfeil auf das Gemeinte",
+      "send_to_chat": "An Chat senden",
+      "send_shortcut": "An Chat senden (⌘↩ / Strg+Eingabe)",
+      "clear_marks": "Markierungen löschen"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "Maximal {{n}} Anheftungen in der Seitenleiste - zuerst eine lösen"

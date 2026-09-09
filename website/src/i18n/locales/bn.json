@@ -7788,7 +7788,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "এই ড্যাশবোর্ডটি HTTPS-এর মাধ্যমে পরিবেশিত, তাই ব্রাউজার এখানে এম্বেড করতে দেয় না কোনো",
       "this_url_is_the_dashboard_s_own_server_which_ref": "এই URL ড্যাশবোর্ডের নিজস্ব সার্ভার, যা এম্বেড করা যায় না। বরং একটি dev-server URL দিন।",
       "web_preview": "ওয়েব প্রিভিউ",
-      "more_actions": "আরও কাজ"
+      "more_actions": "আরও কাজ",
+      "annotate": "চিহ্নিত করুন",
+      "annotate_tooltip": "এই পেজের স্ক্রিনশট নিন, তার উপর আঁকুন এবং প্রতিটি চিহ্নের নিচের উপাদানসহ চ্যাটে পাঠান",
+      "annotate_capture_failed": "পেজ ক্যাপচার করা যায়নি — আবার চেষ্টা করুন"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "শুধু এজেন্ট — {{productName}} কনটেক্সট বা MCP নেই",
@@ -8070,7 +8073,12 @@
       "new_sketch": "নতুন স্কেচ",
       "confirm_discard": "আঁকা বাতিল করুন",
       "already_attached": "সংযুক্ত — আবার স্কেচ করতে ক্যানভাস সম্পাদনা করুন",
-      "load_failed": "স্কেচ প্যাড লোড করা যায়নি — সংযোগ পরীক্ষা করে আবার খুলুন"
+      "load_failed": "স্কেচ প্যাড লোড করা যায়নি — সংযোগ পরীক্ষা করে আবার খুলুন",
+      "annotate_title": "স্ক্রিনশট চিহ্নিত করুন",
+      "annotate_hint": "প্রতিটি চিহ্ন তার নিচের পেজ উপাদানসহ পাঠানো হয় — যা বোঝাতে চান তার উপর বক্স বা তীর আঁকুন",
+      "send_to_chat": "চ্যাটে পাঠান",
+      "send_shortcut": "চ্যাটে পাঠান (⌘↩ / Ctrl+Enter)",
+      "clear_marks": "চিহ্ন মুছুন"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "সাইডবারে সর্বোচ্চ {{n}}টি পিন - প্রথমে একটি আনপিন করুন"

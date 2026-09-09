@@ -410,6 +410,10 @@ function createIpcRegistrar({
     // this bridge never exposes a raw CDP method to the renderer.
     ipcMain.handle("browser:control", (event, panelId, op, args) =>
       windows.browser.control(event.sender, panelId, op, args));
+    // Human-initiated viewport capture + element rects for the Annotate flow.
+    // Not a control op: it reads the view without taking agent ownership.
+    ipcMain.handle("browser:annotate-capture", (event, panelId) =>
+      windows.browser.annotateCapture(event.sender, panelId));
 
     ipcMain.on("mic:denied", () => windows.security.micDenied());
 

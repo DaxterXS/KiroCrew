@@ -361,12 +361,57 @@ const WALKER_SOURCE = `(() => {
     return r;
   }
 
+  // View-viewport rect in CSS px. Consumed by the Browser panel's Annotate
+  // flow, which maps a mark the user drew on a viewport screenshot back to the
+  // element under it; \`formatOutline\` ignores it, so the agent's snapshot text
+  // is unchanged.
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  }
+
+  // A short, human-readable CSS selector for the element -- a hint for the
+  // reader of an annotation, NOT a stable handle (the ref is). Prefers the id,
+  // then a labelled tag, then a shallow nth-of-type path.
+  function selectorOf(el) {
+    try {
+      var esc = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : s; };
+      if (el.id) return "#" + esc(el.id);
+      var tag = el.tagName.toLowerCase();
+      var attrs = ["data-testid", "name", "aria-label"];
+      for (var i = 0; i < attrs.length; i++) {
+        var v = el.getAttribute(attrs[i]);
+        if (v && v.length <= 60) return tag + "[" + attrs[i] + "=\\"" + v.replace(/"/g, "\\\\\\"") + "\\"]";
+      }
+      var parts = [];
+      var cur = el;
+      for (var d = 0; cur && cur.nodeType === 1 && d < 4; d++) {
+        var t = cur.tagName.toLowerCase();
+        if (cur.id) { parts.unshift("#" + esc(cur.id)); break; }
+        var p = cur.parentElement;
+        if (!p) { parts.unshift(t); break; }
+        var same = 0, idx = 0;
+        for (var k = 0; k < p.children.length; k++) {
+          if (p.children[k].tagName === cur.tagName) { same++; if (p.children[k] === cur) idx = same; }
+        }
+        parts.unshift(same > 1 ? t + ":nth-of-type(" + idx + ")" : t);
+        cur = p;
+      }
+      return parts.join(" > ");
+    } catch (e) {
+      return "";
+    }
+  }
+
   var out = [];
   function emit(el, depth) {
     var role = roleFor(el);
     var name = accName(el);
     if (interactive(el, role)) {
-      out.push({ depth: depth, role: role || "generic", name: name, ref: assignRef(el), state: stateOf(el, role) });
+      out.push({
+        depth: depth, role: role || "generic", name: name, ref: assignRef(el), state: stateOf(el, role),
+        rect: rectOf(el), selector: selectorOf(el),
+      });
       return depth + 1;
     }
     if (role === "heading" && name) {

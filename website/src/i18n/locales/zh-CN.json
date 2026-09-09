@@ -7677,7 +7677,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "此仪表板通过 HTTPS 提供服务，因此浏览器会阻止嵌入",
       "this_url_is_the_dashboard_s_own_server_which_ref": "此 URL 是仪表板自身的服务器，不允许被嵌入。请改为输入开发服务器 URL。",
       "web_preview": "网页预览",
-      "more_actions": "更多操作"
+      "more_actions": "更多操作",
+      "annotate": "标注",
+      "annotate_tooltip": "截取当前页面，在图上圈画后发送到聊天，每个标注都会附带其下方的页面元素",
+      "annotate_capture_failed": "无法截取页面 — 请重试"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "仅代理 — 无 {{productName}} 上下文或 MCP",
@@ -7958,7 +7961,12 @@
       "new_sketch": "新建草图",
       "confirm_discard": "丢弃画作",
       "already_attached": "已附加——继续编辑画布可再次草图",
-      "load_failed": "草图板加载失败——请检查网络后重新打开"
+      "load_failed": "草图板加载失败——请检查网络后重新打开",
+      "annotate_title": "标注截图",
+      "annotate_hint": "每个标注都会附带其下方的页面元素 — 用框或箭头指出你要说的东西",
+      "send_to_chat": "发送到聊天",
+      "send_shortcut": "发送到聊天（⌘↩ / Ctrl+Enter）",
+      "clear_marks": "清除标注"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "侧边栏最多置顶 {{n}} 项 - 请先取消置顶一项"

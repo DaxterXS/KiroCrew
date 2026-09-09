@@ -7899,7 +7899,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "Este painel é servido por HTTPS, então o navegador bloqueia a incorporação de uma página",
       "this_url_is_the_dashboard_s_own_server_which_ref": "Esta URL é o próprio servidor do painel, que não permite ser incorporado. Informe a URL de um servidor de desenvolvimento.",
       "web_preview": "Prévia web",
-      "more_actions": "Mais ações"
+      "more_actions": "Mais ações",
+      "annotate": "Anotar",
+      "annotate_tooltip": "Captura esta página, desenha sobre ela e envia-a para o chat com o elemento sob cada marca",
+      "annotate_capture_failed": "Não foi possível capturar a página — tenta novamente"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "Somente agente — sem contexto do {{productName}} nem MCP",
@@ -8182,7 +8185,12 @@
       "new_sketch": "Novo esboço",
       "confirm_discard": "Descartar desenho",
       "already_attached": "Anexado — edite a tela para esboçar novamente",
-      "load_failed": "Não foi possível carregar o bloco de esboços — verifique sua conexão e reabra"
+      "load_failed": "Não foi possível carregar o bloco de esboços — verifique sua conexão e reabra",
+      "annotate_title": "Anotar captura",
+      "annotate_hint": "Cada marca é enviada com o elemento da página por baixo — enquadra ou aponta com uma seta o que queres dizer",
+      "send_to_chat": "Enviar para o chat",
+      "send_shortcut": "Enviar para o chat (⌘↩ / Ctrl+Enter)",
+      "clear_marks": "Limpar marcas"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "Máximo de {{n}} itens fixados na barra lateral: remova um primeiro"

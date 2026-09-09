@@ -5273,6 +5273,9 @@
       "will_provision": "Will provision"
     },
     "webPreviewPanel": {
+      "annotate": "Annotate",
+      "annotate_capture_failed": "Couldn't capture the page — try again",
+      "annotate_tooltip": "Screenshot this page, draw on it, and send it to chat with the element under each mark",
       "back": "Back",
       "browser_live": "Browser — live",
       "browser_view": "Browser view",
@@ -5457,7 +5460,12 @@
       "new_sketch": "New sketch",
       "confirm_discard": "Discard drawing",
       "already_attached": "Attached — edit the canvas to sketch again",
-      "load_failed": "Couldn't load the sketch pad — check your connection and reopen"
+      "load_failed": "Couldn't load the sketch pad — check your connection and reopen",
+      "annotate_hint": "Each mark is sent with the page element under it — box or arrow the thing you mean",
+      "annotate_title": "Annotate screenshot",
+      "clear_marks": "Clear marks",
+      "send_shortcut": "Send to chat (⌘↩ / Ctrl+Enter)",
+      "send_to_chat": "Send to chat"
     }
   },
   "hooks": {

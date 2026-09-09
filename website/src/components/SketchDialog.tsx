@@ -2,8 +2,10 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import type { AppState as ExcalidrawAppState } from '@excalidraw/excalidraw/types'
+import type { FileId } from '@excalidraw/excalidraw/element/types'
 import type * as ExcalidrawModuleType from '@excalidraw/excalidraw'
 import { safeGetItem, safeSetItem } from '../utils/safeStorage'
+import { ANNOTATE_BG_ID, type SceneElementLike } from '../utils/browserAnnotate'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import ErrorBoundary from './ErrorBoundary'
 import { i18nT } from '../i18n/t'
@@ -16,6 +18,13 @@ import { useLanguage } from '../i18n/LanguageProvider'
  * labels beat pixels) and hands both to the composer's regular attachment
  * pipeline, so server-side validation, resizing, and attachment chips are all
  * reused unchanged.
+ *
+ * The same pad doubles as the Browser panel's ANNOTATE editor when given a
+ * `background`: the screenshot is laid in as a locked image element at scene
+ * (0,0) sized to the CSS viewport, so every mark the user draws is already in
+ * page CSS-px coordinates (see utils/browserAnnotate.ts). In that mode nothing
+ * is persisted (each capture is its own scene), the export has no padding so
+ * the PNG stays pixel-aligned with the page, and ⌘/Ctrl+Enter sends.
  *
  * Excalidraw is ~1MB, so the component AND its stylesheet load lazily on first
  * open; the main bundle carries only this wrapper. The last scene is kept in a
@@ -65,14 +74,36 @@ const EXCALIDRAW_LANG: Record<string, string> = {
   ru: 'ru-RU',
 }
 
+/** A screenshot to draw over (Browser panel Annotate). */
+export interface SketchBackground {
+  /** `data:image/png;base64,…` of the capture. */
+  dataUrl: string
+  /** Layout size in scene units = the page's CSS viewport size. */
+  width: number
+  height: number
+  /** Export pixel density; the capture's devicePixelRatio keeps the PNG as
+   *  sharp as the page (clamped to 2 so a 3× phone-class display does not
+   *  produce a multi-megabyte attachment). */
+  exportScale?: number
+}
+
+/** Default stroke for annotation marks: a saturated red reads on light AND
+ *  dark pages, and a clean (roughness 0) 2px line looks like a callout rather
+ *  than a doodle. Users can still pick another colour in the toolbar. */
+const ANNOTATE_STROKE = '#e03131'
+
 interface SketchDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Receives the exported files (PNG + .excalidraw source) on insert. */
-  onInsert: (files: File[]) => void
+  /** Receives the exported files (PNG + .excalidraw source) on insert. In
+   *  annotate mode: the PNG alone, plus the live scene elements so the caller
+   *  can map marks to page elements. */
+  onInsert: (files: File[], scene?: { elements: readonly SceneElementLike[] }) => void
   /** Focused when the dialog closes — the launcher row unmounts with the menu,
    *  so Radix's default restore target is `body`. */
   returnFocusRef?: React.RefObject<HTMLElement | null>
+  /** Present = annotate mode (see the module comment). */
+  background?: SketchBackground | null
 }
 
 /** Where the last scene survives a reload or session switch — the drawing
@@ -119,8 +150,9 @@ function readStoredScene(): StoredScene | null {
   }
 }
 
-export default function SketchDialog({ open, onOpenChange, onInsert, returnFocusRef }: SketchDialogProps) {
+export default function SketchDialog({ open, onOpenChange, onInsert, returnFocusRef, background }: SketchDialogProps) {
   const { resolved: uiLanguage } = useLanguage()
+  const annotate = !!background
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   /** Last scene — elements, appState AND the file map (embedded images live
    *  there, not in elements) — kept in a ref between opens. localStorage
@@ -154,22 +186,41 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
   // at render time keeps this component free of the theme hook's re-renders.
   const mode = typeof document !== 'undefined' && document.documentElement.dataset.mode === 'light' ? 'light' : 'dark'
 
+  /** "Something to send": in annotate mode the locked background does not count. */
+  const countDrawn = useCallback((elements: readonly { id: string }[]) =>
+    annotate ? elements.some(e => e.id !== ANNOTATE_BG_ID) : elements.length > 0, [annotate])
+
   const handleApi = useCallback((api: ExcalidrawImperativeAPI) => {
     apiRef.current = api
-    setHasElements(api.getSceneElements().length > 0)
-  }, [])
+    setHasElements(countDrawn(api.getSceneElements()))
+    if (annotate) {
+      // Land on the rectangle tool with the whole screenshot in view: the
+      // first gesture on an annotation pad is "box the thing", not "pan".
+      api.setActiveTool({ type: 'rectangle' })
+      // Deferred: at API hand-off the canvas has not been measured yet, and a
+      // fit computed against a 0×0 viewport degrades to zoom 1 (the screenshot
+      // then overflows the pad). Two passes cover a slow first layout.
+      const fit = () => api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.9, animate: false })
+      setTimeout(fit, 0)
+      setTimeout(fit, 150)
+    }
+  }, [annotate, countDrawn])
 
   const handleChange = useCallback(() => {
     const api = apiRef.current
     if (!api) return
     const elements = api.getSceneElements()
+    setHasElements(countDrawn(elements))
+    setAttached(false)
+    // Annotate scenes are one capture each: nothing to restore later, and a
+    // screenshot must never be written to localStorage (it could be a page
+    // with the user's data on it, and it would evict the sketch draft).
+    if (annotate) return
     sceneRef.current = {
       elements,
       appState: api.getAppState() as unknown as Record<string, unknown>,
       files: api.getFiles(),
     }
-    setHasElements(elements.length > 0)
-    setAttached(false)
     // Debounced localStorage write: Excalidraw fires onChange per pointer
     // move, and a synchronous serialize of a large scene on every event
     // would jank the stroke being drawn. The payload is `serializeAsJSON`
@@ -202,13 +253,13 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
         // Quota or serialization failure: in-memory restore still works.
       }
     }, 500)
-  }, [])
+  }, [annotate, countDrawn])
 
   const handleInsert = useCallback(async () => {
     const api = apiRef.current
     if (!api || exporting) return
     const elements = api.getSceneElements()
-    if (!elements.length) return
+    if (!countDrawn(elements)) return
     setExporting(true)
     setExportFailed(false)
     try {
@@ -218,14 +269,36 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
       if (!mod) return
       const appState = api.getAppState()
       const files = api.getFiles()
+      // Local-time stamp, mirroring nameClipboardImage's pasted-image naming.
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      if (annotate) {
+        // No padding and never dark-mode export: the PNG must stay the page's
+        // own pixels with marks on top, aligned to the CSS-px coordinates the
+        // sidecar note reports. exportScale follows the capture's DPR so the
+        // attachment is as sharp as the screenshot it came from.
+        const blob = await mod.exportToBlob({
+          elements,
+          appState: {
+            ...appState,
+            exportBackground: true,
+            exportWithDarkMode: false,
+            exportScale: Math.min(2, Math.max(1, background?.exportScale ?? 1)),
+          },
+          files,
+          exportPadding: 0,
+          mimeType: 'image/png',
+        })
+        const png = new File([blob], `browser-annotation-${ts}.png`, { type: 'image/png' })
+        onInsert([png], { elements: elements as unknown as readonly SceneElementLike[] })
+        onOpenChange(false)
+        return
+      }
       const blob = await mod.exportToBlob({
         elements,
         appState: { ...appState, exportBackground: true },
         files,
         mimeType: 'image/png',
       })
-      // Local-time stamp, mirroring nameClipboardImage's pasted-image naming.
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       const png = new File([blob], `sketch-${ts}.png`, { type: 'image/png' })
       // ".excalidraw" is the scene's own extension: the dashboard's read-only
       // scene renderer (FileRenderers) routes on it, so the chip renders as a
@@ -250,14 +323,24 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
     } finally {
       setExporting(false)
     }
-  }, [exporting, onInsert, onOpenChange])
+  }, [exporting, onInsert, onOpenChange, annotate, background?.exportScale, countDrawn])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         maxWidth={1100}
         className="w-[min(1100px,94vw)] h-[min(720px,88vh)] p-0 gap-0 flex flex-col overflow-hidden"
-        data-testid="sketch-dialog"
+        data-testid={annotate ? 'annotate-dialog' : 'sketch-dialog'}
+        // ⌘/Ctrl+Enter sends an annotation. Capture phase so the shortcut
+        // works while focus sits inside Excalidraw's canvas, where Enter alone
+        // is the library's own "edit text" key and must stay untouched.
+        onKeyDownCapture={e => {
+          if (!annotate) return
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            void handleInsert()
+          }
+        }}
         // Radix's DismissableLayer catches Escape in the CAPTURE phase — before
         // Excalidraw's own handlers — so Escape meant to finish a text label or
         // cancel a shape would dismiss the whole modal. Yield Escape to the
@@ -291,7 +374,7 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
             confuses most. */}
         <div className="flex items-center flex-wrap gap-x-3 gap-y-1 px-4 py-2 min-h-12 shrink-0 border-b border-border">
           <DialogTitle className="text-sm font-semibold m-0 truncate min-w-0">
-            {i18nT('components.sketchDialog.title')}
+            {annotate ? i18nT('components.sketchDialog.annotate_title') : i18nT('components.sketchDialog.title')}
           </DialogTitle>
           <div className="flex-1 min-w-0" />
           {exportFailed && (
@@ -306,9 +389,11 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
             <span className="text-[11.5px] text-muted min-w-0">
               {!hasElements
                 ? i18nT('components.sketchDialog.draw_something_first')
-                : attached
-                  ? i18nT('components.sketchDialog.already_attached')
-                  : i18nT('components.sketchDialog.insert_hint')}
+                : annotate
+                  ? i18nT('components.sketchDialog.annotate_hint')
+                  : attached
+                    ? i18nT('components.sketchDialog.already_attached')
+                    : i18nT('components.sketchDialog.insert_hint')}
             </span>
           )}
           <button
@@ -318,12 +403,16 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
             className="text-[13px] px-3.5 py-1.5 rounded-lg font-semibold bg-accent text-accent-fg border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors mr-10 shrink-0"
             onClick={handleInsert}
             disabled={!hasElements || exporting}
-            title={hasElements ? undefined : i18nT('components.sketchDialog.draw_something_first')}
-            aria-label={i18nT('components.sketchDialog.attach_to_message')}
+            title={hasElements
+              ? (annotate ? i18nT('components.sketchDialog.send_shortcut') : undefined)
+              : i18nT('components.sketchDialog.draw_something_first')}
+            aria-label={annotate ? i18nT('components.sketchDialog.send_to_chat') : i18nT('components.sketchDialog.attach_to_message')}
           >
             {exporting
               ? <Loader2 size={14} className="animate-spin lucide-inline" />
-              : i18nT('components.sketchDialog.attach_to_message')}
+              : annotate
+                ? i18nT('components.sketchDialog.send_to_chat')
+                : i18nT('components.sketchDialog.attach_to_message')}
           </button>
         </div>
         <div className="flex-1 min-h-0">
@@ -360,6 +449,45 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
                 // `restore()` output needs no collaborators patch — it
                 // normalizes appState itself.
                 initialData={() => {
+                  if (background) {
+                    // The screenshot as a LOCKED image at scene origin sized to
+                    // the CSS viewport: scene units == page CSS px, which is
+                    // the contract utils/browserAnnotate.ts maps marks with.
+                    // Locked so a drag on the page pans/draws instead of
+                    // moving the background out from under the coordinates.
+                    const mod = excalidrawModule
+                    if (!mod) return null
+                    const fileId = ANNOTATE_BG_ID as FileId
+                    const bg = mod.convertToExcalidrawElements([{
+                      type: 'image',
+                      id: ANNOTATE_BG_ID,
+                      x: 0,
+                      y: 0,
+                      width: background.width,
+                      height: background.height,
+                      fileId,
+                      status: 'saved',
+                      locked: true,
+                    }], { regenerateIds: false })
+                    return {
+                      elements: bg,
+                      appState: {
+                        currentItemStrokeColor: ANNOTATE_STROKE,
+                        currentItemStrokeWidth: 2,
+                        currentItemRoughness: 0,
+                        currentItemBackgroundColor: 'transparent',
+                        collaborators: new Map(),
+                      } as never,
+                      files: {
+                        [fileId]: {
+                          id: fileId,
+                          mimeType: 'image/png',
+                          dataURL: background.dataUrl as never,
+                          created: Date.now(),
+                        },
+                      },
+                    }
+                  }
                   const scene = sceneRef.current ?? readStoredScene()
                   if (!scene) return null
                   return {
@@ -394,6 +522,13 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
                       setDiscardArmed(false)
                       const api = apiRef.current
                       if (!api) return
+                      if (annotate) {
+                        // Clear the marks, keep the screenshot: a blank canvas
+                        // would leave nothing to annotate and no way back.
+                        api.updateScene({ elements: api.getSceneElements().filter(e => e.id === ANNOTATE_BG_ID) })
+                        setHasElements(false)
+                        return
+                      }
                       api.resetScene()
                       if (persistTimer.current) clearTimeout(persistTimer.current)
                       sceneRef.current = null
@@ -407,11 +542,15 @@ export default function SketchDialog({ open, onOpenChange, onInsert, returnFocus
                     disabled={!hasElements || exporting}
                     aria-label={discardArmed
                       ? i18nT('components.sketchDialog.confirm_discard')
-                      : i18nT('components.sketchDialog.new_sketch')}
+                      : annotate
+                        ? i18nT('components.sketchDialog.clear_marks')
+                        : i18nT('components.sketchDialog.new_sketch')}
                   >
                     {discardArmed
                       ? i18nT('components.sketchDialog.confirm_discard')
-                      : i18nT('components.sketchDialog.new_sketch')}
+                      : annotate
+                        ? i18nT('components.sketchDialog.clear_marks')
+                        : i18nT('components.sketchDialog.new_sketch')}
                   </button>
                 )}
                 UIOptions={{

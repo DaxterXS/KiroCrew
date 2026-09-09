@@ -234,6 +234,10 @@ contextBridge.exposeInMainWorld("browserAPI", {
     ipcRenderer.invoke("browser:set-control-owner", panelId, owner),
   getControl: (panelId) => ipcRenderer.invoke("browser:get-control", panelId),
   control: (panelId, op, args) => ipcRenderer.invoke("browser:control", panelId, op, args),
+  // Human-initiated Annotate: a PNG of the view's viewport plus the interactive
+  // elements (same `eN` refs the agent's snapshot mints) with CSS-px rects.
+  // Reads the page through capturePage, not the agent control plane.
+  annotateCapture: (panelId) => ipcRenderer.invoke("browser:annotate-capture", panelId),
   // Declares that a chat session may host a browser panel, so the agent command
   // channel polls for it even before the Browser tab is ever opened. Grants no
   // authorization — authorization to drive the built-in browser is Browser Mode

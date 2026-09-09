@@ -7899,7 +7899,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "Ce tableau de bord est servi via HTTPS, donc le navigateur bloque l'intégration d'une page",
       "this_url_is_the_dashboard_s_own_server_which_ref": "Cette URL est le serveur du tableau de bord lui-même, qui refuse d'être intégré. Saisissez plutôt l'URL d'un serveur de développement.",
       "web_preview": "Aperçu web",
-      "more_actions": "Plus d'actions"
+      "more_actions": "Plus d'actions",
+      "annotate": "Annoter",
+      "annotate_tooltip": "Capturer cette page, dessiner dessus et l’envoyer au chat avec l’élément situé sous chaque repère",
+      "annotate_capture_failed": "Impossible de capturer la page — réessayez"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "Agent seul — aucun contexte {{productName}} ni MCP",
@@ -8182,7 +8185,12 @@
       "new_sketch": "Nouveau croquis",
       "confirm_discard": "Abandonner le dessin",
       "already_attached": "Joint — modifiez le canevas pour dessiner à nouveau",
-      "load_failed": "Impossible de charger le bloc de croquis — vérifiez votre connexion et rouvrez-le"
+      "load_failed": "Impossible de charger le bloc de croquis — vérifiez votre connexion et rouvrez-le",
+      "annotate_title": "Annoter la capture",
+      "annotate_hint": "Chaque repère est envoyé avec l’élément de page situé dessous — encadrez ou fléchez ce que vous voulez désigner",
+      "send_to_chat": "Envoyer au chat",
+      "send_shortcut": "Envoyer au chat (⌘↩ / Ctrl+Entrée)",
+      "clear_marks": "Effacer les repères"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "Maximum {{n}} éléments épinglés à la barre latérale : détachez-en un d'abord"

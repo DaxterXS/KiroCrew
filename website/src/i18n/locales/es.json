@@ -7899,7 +7899,10 @@
       "this_dashboard_is_served_over_https_so_the_brows": "Este panel se sirve por HTTPS, por lo que el navegador bloquea incrustar una página",
       "this_url_is_the_dashboard_s_own_server_which_ref": "Esta URL es el propio servidor del panel, que no permite ser incrustado. Introduce en su lugar la URL de un servidor de desarrollo.",
       "web_preview": "Vista previa web",
-      "more_actions": "Más acciones"
+      "more_actions": "Más acciones",
+      "annotate": "Anotar",
+      "annotate_tooltip": "Captura esta página, dibuja sobre ella y envíala al chat con el elemento que hay bajo cada marca",
+      "annotate_capture_failed": "No se pudo capturar la página — inténtalo de nuevo"
     },
     "welcomeView": {
       "agent_only_no_kirocrew_context_or_mcp": "Solo agente — sin contexto de {{productName}} ni MCP",
@@ -8182,7 +8185,12 @@
       "new_sketch": "Nuevo boceto",
       "confirm_discard": "Descartar dibujo",
       "already_attached": "Adjuntado: edita el lienzo para volver a dibujar",
-      "load_failed": "No se pudo cargar el bloc de bocetos: revisa tu conexión y vuelve a abrirlo"
+      "load_failed": "No se pudo cargar el bloc de bocetos: revisa tu conexión y vuelve a abrirlo",
+      "annotate_title": "Anotar captura",
+      "annotate_hint": "Cada marca se envía con el elemento de la página que hay debajo — encuadra o señala con una flecha lo que quieres decir",
+      "send_to_chat": "Enviar al chat",
+      "send_shortcut": "Enviar al chat (⌘↩ / Ctrl+Intro)",
+      "clear_marks": "Borrar marcas"
     },
     "pinSurfaceButton": {
       "pin_limit_reached": "Máximo {{n}} elementos fijados en la barra lateral: quita uno primero"

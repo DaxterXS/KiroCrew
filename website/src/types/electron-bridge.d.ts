@@ -115,6 +115,35 @@ declare global {
     title: string
   }
 
+  /** One interactive element from the Annotate capture: the agent-visible ref
+   *  plus where it sits in the viewport (CSS px). */
+  interface BrowserAnnotateElement {
+    ref: string
+    role: string
+    name: string
+    selector: string
+    rect: { x: number; y: number; width: number; height: number }
+  }
+
+  type BrowserAnnotateCapture =
+    | {
+        ok: true
+        /** Base64 PNG of the viewport. */
+        png: string
+        /** PNG pixel size. */
+        width: number
+        height: number
+        /** CSS viewport size the PNG shows; element rects are in this space. */
+        cssWidth: number
+        cssHeight: number
+        dpr: number
+        url: string
+        title: string
+        elements: BrowserAnnotateElement[]
+        walkerError?: string
+      }
+    | { ok: false; code: string; error: string }
+
   interface BrowserAPI {
     open: (panelId: string, url: string) => Promise<NativeBrowserState | null>
     navigate: (panelId: string, url: string) => Promise<NativeBrowserState | null>
@@ -131,6 +160,8 @@ declare global {
     setControlOwner: (panelId: string, owner: string) => Promise<unknown>
     getControl: (panelId: string) => Promise<unknown>
     control: (panelId: string, operation: string, args: unknown) => Promise<unknown>
+    /** Optional: absent on a desktop shell older than the Annotate feature. */
+    annotateCapture?: (panelId: string) => Promise<BrowserAnnotateCapture | null>
     trackSession: (panelId: string, tracked: boolean) => Promise<unknown>
     onAgentOpened: (cb: (event: NativeBrowserEvent) => void) => () => void
     onDidNavigate: (cb: (event: NativeBrowserEvent) => void) => () => void
