@@ -2054,8 +2054,8 @@
         "title": "Action Approval",
         "tool": "Tool",
         "trust_all_base": "Trust all {{base}} commands",
-        "trust_all_tools": "Trust all tools",
-        "trust_hint": "Trust also auto-approves {{tool}} from now on.",
+        "trust_all_tools": "Trust all tools for this session",
+        "trust_hint": "Trust auto-approves every tool for the rest of this session.",
         "trust_this_command": "Trust “{{cmd}}”",
         "trusted": "Trusted"
       },
@@ -4219,7 +4219,7 @@
       "stopping_2": "Stopping",
       "taking_longer_than_expected": "taking longer than expected",
       "total": "Total",
-      "trust_reads": "Trust reads",
+      "trust_reads": "Trust read-only commands",
       "turn_interrupted_press_continue": "Last turn was interrupted — press Resume, or just type",
       "upload_file": "Upload file",
       "use_a_skill": "Use a skill",
@@ -5169,7 +5169,7 @@
     },
     "trustDropdown": {
       "trust": "Trust",
-      "trust_all_tools": "Trust all tools"
+      "trust_all_tools": "Trust all tools for this session"
     },
     "tunnelStatus": {
       "tunnel": "Tunnel"
@@ -6994,9 +6994,18 @@
       "stat_today": "Today",
       "stat_week": "Past 7 days",
       "recent_activity": "Recent activity",
-      "activity_chat": "Conversation",
-      "activity_routed": "Routed to this member",
+      "activity_chat": "Chat",
+      "activity_routed": "Auto-picked by the orchestrator for a task",
       "activity_empty": "No recorded activity yet.",
+      "activity_chat_count_one": "{{count}} chat",
+      "activity_chat_count_other": "{{count}} chats",
+      "activity_routed_count_one": "{{count}} auto-picked",
+      "activity_routed_count_other": "{{count}} auto-picked",
+      "activity_more_days_one": "Show {{count}} more day",
+      "activity_more_days_other": "Show {{count}} more days",
+      "activity_capped": "Only the most recent events are loaded; the oldest day shown may be incomplete.",
+      "activity_projects_more_one": "{{name}} & {{count}} more",
+      "activity_projects_more_other": "{{name}} & {{count}} more",
       "wake_sources": "Wake sources",
       "open_schedule": "Open Schedule",
       "wake_none": "Nothing wakes this member automatically.",
@@ -8626,7 +8635,11 @@
         "stopping": "Stopping…",
         "starting": "Starting…",
         "changed_outside_this_form": "This instance changed outside this form ({{fields}}). Check the row above — if it is not the instance you started editing, cancel.",
-        "use_my_edits_anyway": "Apply my edits to the instance as it is now"
+        "use_my_edits_anyway": "Apply my edits to the instance as it is now",
+        "provisioner_choose": "Where should the new instance run?",
+        "provisioner_stale_choice": "The instance type you used before ({{label}} was chosen for you) is no longer offered by this gateway.",
+        "provisioner_none_drawable": "This gateway offers no way to create an instance that this dashboard can draw. Update the dashboard, or ask your administrator which provisioner to use.",
+        "provisioners_unavailable": "Could not read which ways of creating an instance this gateway offers. The built-in AWS launcher is shown."
       },
       "webhooksPanel": {
         "inbound_webhooks": "Inbound webhooks",
