@@ -68,18 +68,24 @@ function probeRow(
   }
 }
 
-function wrap() {
+function wrapWithClient() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={qc}>
       <AgentBackendTab />
     </QueryClientProvider>,
   )
+  return { qc }
+}
+
+function wrap() {
+  wrapWithClient()
 }
 
 const button = (name: string) => screen.getByRole('button', { name })
 
 beforeEach(() => {
+  localStorage.clear()
   patchConfigMock.mockClear()
   patchConfigMock.mockResolvedValue({})
   kirocrewConfigMock.mockClear()
@@ -144,6 +150,34 @@ describe('AgentBackendTab', () => {
     wrap()
     fireEvent.click(await screen.findByRole('button', { name: 'KAS (kiro-agent)' }))
     await waitFor(() => expect(patchConfigMock).toHaveBeenCalledWith('agent.acp_backend', 'kas'))
+  })
+
+  it('refetches the model list and drops its localStorage cache after a switch', async () => {
+    // The picker's list belongs to the OLD backend until something re-asks
+    // `/api/models`, and nothing but a session spawn does -- so without this the
+    // list only changed after a gateway restart. The cache drop keeps a failing
+    // first fetch on the new backend from serving the old backend's ids.
+    localStorage.setItem('kc.acp.models.v1', JSON.stringify({ ts: Date.now(), models: [{ name: 'auto', description: '' }] }))
+    const { qc } = wrapWithClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    fireEvent.click(await screen.findByRole('button', { name: 'KAS (kiro-agent)' }))
+    await waitFor(() => expect(patchConfigMock).toHaveBeenCalledWith('agent.acp_backend', 'kas'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['available-models'] }))
+    expect(localStorage.getItem('kc.acp.models.v1')).toBeNull()
+  })
+
+  it('leaves the model list alone when the save is rejected', async () => {
+    // A refused PATCH means the backend did NOT change; refetching would spawn
+    // `--list-models` for nothing, and dropping the cache would throw away a
+    // list that is still correct.
+    patchConfigMock.mockRejectedValueOnce(new Error('403'))
+    localStorage.setItem('kc.acp.models.v1', JSON.stringify({ ts: Date.now(), models: [{ name: 'auto', description: '' }] }))
+    const { qc } = wrapWithClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    fireEvent.click(await screen.findByRole('button', { name: 'KAS (kiro-agent)' }))
+    await screen.findByText('Could not save the agent backend.')
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['available-models'] })
+    expect(localStorage.getItem('kc.acp.models.v1')).not.toBeNull()
   })
 
   it('hides a backend the deployment may not select, rather than dimming it', async () => {

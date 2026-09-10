@@ -8,6 +8,7 @@ import ErrorNotice from '../../components/ErrorNotice'
 import { SettingsCard, SettingsButtonGroup } from '../../components/settings'
 import { useConfigSchema } from '../../components/settingRef/useConfigSchema'
 import { i18nT } from '../../i18n/t'
+import { clearCachedModels } from '../../providers/adapters/acp'
 
 /** The config field the switch owns. Also the schema path the options are gated on. */
 const CONFIG_KEY = 'agent.acp_backend'
@@ -167,6 +168,18 @@ export function AgentBackendTab() {
     onSuccess: () => {
       setSaveError('')
       qc.invalidateQueries({ queryKey: ['kirocrewConfig'] })
+      // The model list is the NEW backend's now. `/api/models` re-reads
+      // `agent.acp_backend` on every call, so the server side needs no restart;
+      // only the frontend cache did, because `['available-models']` is refetched
+      // in exactly one other place — a spawned session (`useWebSocket`'s
+      // `activity_event`) — and the global `staleTime: Infinity` plus the
+      // self-heal poll stopping after one live success mean nothing else ever
+      // re-asks. That is why the picker looked like it needed a gateway restart:
+      // the restart was just the next session spawn. Drop the last-good
+      // localStorage list FIRST so a failing first fetch on the new backend
+      // degrades to auto-only rather than to the old backend's ids.
+      clearCachedModels()
+      qc.invalidateQueries({ queryKey: ['available-models'] })
     },
     // No optimistic write and no local mirror of the value: the button group reads
     // straight from the query, so a rejected PATCH needs no revert — the cache was
