@@ -48,6 +48,7 @@ agent loads only the one it needs.
 | Spec | Subsystem |
 |---|---|
 | [subagent.md](subagent.md) | Spawning background workers, result delivery, and orphan recovery. |
+| [monitor-architecture.md](monitor-architecture.md) | The paradigm every monitoring loop follows: the seven layers, the plural probe contract, level-triggered decision, versioned state, and how to add a new monitored kind. Umbrella over the two implementation specs below. |
 | [agent-interrupt-controller.md](agent-interrupt-controller.md) | `kiro_crew.irq`: masking, coalescing, epoch resets and an error backstop for script-cron pollers, so a cheap probe interrupts an expensive agent turn instead of the turn polling. Also the app-facing probe SDK. |
 | [babysit-pr-watch.md](babysit-pr-watch.md) | Zero-token PR polling for babysit loops: a script cron that wakes the owning session only on unexpected state. |
 | [task.md](task.md) | Task models and state. |
@@ -86,6 +87,7 @@ agent loads only the one it needs.
 | [mcp-apps.md](mcp-apps.md) | Apps that surface as MCP servers. |
 | [mcp-shareability.md](mcp-shareability.md) | Predicting which MCP servers can share one backend, from local evidence. |
 | [mcp-gateway-backend-replacement.md](mcp-gateway-backend-replacement.md) | Validating a replacement MCP backend's tool set before a live session adopts it. |
+| [mcp-gateway-daemon-lifecycle.md](mcp-gateway-daemon-lifecycle.md) | The MCP gateway daemon has one owning gateway and one code revision: owner-liveness self-exit, the fingerprint adoption gate, the CLI stop, and the stale-backend diagnosis. |
 | [mcp-probe-quarantine.md](mcp-probe-quarantine.md) | A durable consecutive-probe-failure count per MCP server, surfaced on its dashboard row with a reset control. The unmount half is deferred; the spec records why. |
 | [app-notifications.md](app-notifications.md) | How an app publishes a notification to the local bus, and the two shipped producers. |
 | [artifacts.md](artifacts.md) | Artifact identity, versioning, and the companion chat panel. |

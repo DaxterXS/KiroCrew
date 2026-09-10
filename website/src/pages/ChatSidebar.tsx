@@ -19,7 +19,7 @@ import { useConnected } from '../hooks/useConnected'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '../components/ui/dropdown-menu'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '../components/ui/context-menu'
 import { offlineProps } from '../utils/offline'
-import { switchSlot, createSlot, deleteSlot, fetchHistory, resumeFromHistory, deleteHistorySession, clearSlotReveal, selectSidebarSubagentCounts, selectSidebarApprovalCounts, selectSidebarWorkflowActive, selectSidebarWorkflowActiveKeys, selectGoalLoopKeys } from '../store/chatSlice'
+import { switchSlot, createSlot, deleteSlot, fetchHistory, resumeFromHistory, deleteHistorySession, clearSlotReveal, selectSidebarSubagentCounts, selectSidebarApprovalCounts, selectSidebarWorkflowActive, selectSidebarWorkflowActiveKeys, selectSidebarAutomationRunningKeys, selectAutomationForSlot } from '../store/chatSlice'
 import { sseSlotTitle, setSidebarOrder } from '../store/dashboardSlice'
 import { useDigitModifierHeld, jumpLabelFor, IS_MAC } from '../hooks/useKeyboardShortcuts'
 import { api, SEARCH_MIN_CHARS } from '../api/client'
@@ -94,6 +94,8 @@ import { DEFAULT_STALE_COLLAPSE_MS, STALE_COLLAPSE_PRESETS_MS, STALE_COLLAPSE_TI
 import type { StaleSplit } from './staleCollapse'
 import type { SortKey } from './chat/sessionOrder'
 import { useLanguageGeneration } from '../i18n/useLanguageGeneration'
+import { deriveAutomationStatus, MONITOR_STATUS_KEYS } from '../monitoring/automation'
+import MonitorRadar from '../components/MonitorRadar'
 
 import { i18nT } from '../i18n/t'
 import { agentOrDefaultLabel } from '../utils/agentLabel'
@@ -139,6 +141,28 @@ const RENAME_MAX_H = 120
 /** Above this many rendered rows, per-row layout animation (and its group-wide
  *  rect measurement) is disabled — the IssueList/PrList ANIM_CAP pattern. */
 const SIDEBAR_ANIM_CAP = 200
+
+/** Rows at or past this paint ordinal share ONE `orderStamp`, so an insertion
+ *  or reorder above them does not re-render them: they snap into their new
+ *  position instead of springing there.
+ *
+ *  `orderStamp` exists so a displaced row re-renders and framer measures it
+ *  (see SessionRowProps). Stamped as a plain ordinal, a New Chat landing at the
+ *  top of a 160-session sidebar shifts every ordinal by one and voids all 160
+ *  memo boundaries in one commit — 160 row bodies, 160 layout measurements and
+ *  a group-wide spring — for a change whose visible effect is a handful of rows
+ *  sliding down by one slot. The rows below the fold are displaced too, but
+ *  nobody sees them move, so their spring buys nothing.
+ *
+ *  48 rows is roughly two sidebar viewports of 56px rows: the visible
+ *  displacement stays continuous (the persistent-element rule in
+ *  website/AGENTS.md is about what the user can see move), while the per-insert
+ *  cost is bounded by this constant instead of growing with the session count.
+ *  The deliberate casualty: a user scrolled deep into the list sees rows beyond
+ *  the window snap rather than slide when something above them moves. The
+ *  ordinal-bump above the window still has its usual cost, so this is a bound,
+ *  not a fix for rows inside it. Pinned by ChatSidebar.rowMemo.test.tsx. */
+export const SIDEBAR_DISPLACEMENT_WINDOW = 48
 
 const ROW_META_CLS = 'text-[10px] leading-[12px]'
 const ROW_TITLE_CLS = 'text-[13px] leading-[20px]'
@@ -1406,12 +1430,13 @@ export const sessionRowRenderProbe: { current: ((slotKey: string) => void) | nul
 interface SessionRowProps {
   slot: Slot
   /** Render-order stamp: increments per row in paint order across the whole
-   *  sidebar. A row whose on-screen position moves (rows above it added,
-   *  removed or reordered) gets a changed stamp and re-renders — framer's
-   *  layout="position" spring only measures a component that re-renders, so
-   *  without this the memo boundary would swallow the re-render and displaced
-   *  rows would snap into place instead of animating. Rows above the change
-   *  keep their stamp and still bail out. */
+   *  sidebar, clamped at SIDEBAR_DISPLACEMENT_WINDOW. A row whose on-screen
+   *  position moves (rows above it added, removed or reordered) gets a changed
+   *  stamp and re-renders — framer's layout="position" spring only measures a
+   *  component that re-renders, so without this the memo boundary would
+   *  swallow the re-render and displaced rows would snap into place instead
+   *  of animating. Rows above the change keep their stamp and still bail out;
+   *  so do rows past the window, which snap by design. */
   orderStamp: number
   /** False above SIDEBAR_ANIM_CAP rows or under prefers-reduced-motion:
    *  the shell computes the gate once so every row's layout spring,
@@ -1514,16 +1539,9 @@ const SessionRow = memo(function SessionRow({
   // whole-map read re-renders every row per event — the regression the memo
   // test's render probe exists to catch.
   const statusDetail = useAppSelector(st => st.chat.slotStatusDetail?.[s.key])
-  // Presence in `goalLoops` means "this session is in an active goal loop".
-  // Own-property read only: the store normalizes writes through `safeKey`
-  // (`__proto__`/`constructor`/`prototype` are rerouted to an inert key), so a
-  // bare `goalLoops[s.key]` would disagree with it — returning a truthy
-  // `Object.prototype` for such a key and rendering "Loop · undefined" while
-  // suppressing the row's unread dot.
-  const goalLoop = useAppSelector(st => {
-    const loops = st.chat.goalLoops
-    return loops && Object.prototype.hasOwnProperty.call(loops, s.key) ? loops[s.key] : undefined
-  })
+  const automation = useAppSelector(st => selectAutomationForSlot(st, s.key))
+  const goalLoop = automation?.kind === 'legacy_goal_loop' ? automation : undefined
+  const monitor = automation?.kind === 'structured_monitor' ? automation : null
   const queuedForSlot = useAppSelector(st => st.chat.subagentQueued?.[s.key] || 0)
   // {count, name, phase} of this slot's running workflow fan-out, or undefined.
   // shallowEqual because the map is rebuilt per run event; the primitives only
@@ -1618,16 +1636,23 @@ const SessionRow = memo(function SessionRow({
     // turn is parked on it, so this replaces a "Thinking…" that would otherwise
     // never change rather than annotating a finished turn.
     const needsInputLabel = i18nT('pages.chatSidebar.needs_your_answer')
+    const monitorStatus = monitor ? deriveAutomationStatus(monitor) : null
+    const monitorOwnsRunning = !!monitor && monitor.active && !monitor.terminal
+    const monitorLabel = monitorStatus
+      ? i18nT('components.sessionAutomationPopover.sidebar_status', {
+        status: i18nT(MONITOR_STATUS_KEYS[monitorStatus]),
+      })
+      : ''
     // Goal loop (auto-nudge). A loop is a MODE, not a turn state, so it is not
     // gated on `s.running` — a looping session spends most of its life mid-turn,
     // and hiding the indicator then would hide it almost always.
-    // `max_cycles === 0` means unlimited (autonudge.py NudgeLoop default), so
+    // `maxCycles === 0` means unlimited (autonudge.py NudgeLoop default), so
     // there is no denominator to show — fall back to a bare count.
     const goalLoopLabel = !goalLoop
       ? ''
-      : goalLoop.max_cycles > 0
-        ? i18nT('pages.chatSidebar.loop', { count: goalLoop.cycle_count, total: goalLoop.max_cycles })
-        : i18nT('pages.chatSidebar.loop_2', { count: goalLoop.cycle_count })
+      : goalLoop.maxCycles > 0
+        ? i18nT('pages.chatSidebar.loop', { count: goalLoop.cycleCount, total: goalLoop.maxCycles })
+        : i18nT('pages.chatSidebar.loop_2', { count: goalLoop.cycleCount })
     // The loop is armed but its session's last turn died — a trailing error row
     // or an unanswered user row, the state behind the composer's Resume button —
     // and nothing is executing on its behalf. The pulsing dot below would claim
@@ -1742,6 +1767,19 @@ const SessionRow = memo(function SessionRow({
         ),
       },
       {
+        // An actionable wake is executing agent work now, so it outranks the
+        // ordinary work signals below while remaining under decisions the user
+        // owes. Scheduled and terminal monitors resolve at the tail.
+        key: 'structured_monitor_action',
+        when: !!monitor && monitorStatus === 'action_running',
+        build: () => (
+          <div className={ROW_STATUS_LINE_CLS} title={monitorLabel}>
+            <MonitorRadar actionRunning className="text-accent" />
+            <span className="truncate font-medium">{monitorLabel}</span>
+          </div>
+        ),
+      },
+      {
         // An active goal loop outranks every "working" signal below it but
         // stays under both approval branches: an owed decision must never read
         // as unattended progress. Nothing is lost by ranking it high —
@@ -1754,7 +1792,7 @@ const SessionRow = memo(function SessionRow({
         key: 'goal_loop',
         when: !!goalLoop,
         build: () => (
-          <div className={ROW_STATUS_LINE_CLS} title={goalLoopStalled ? i18nT('pages.chatSidebar.goal_loop_interrupted_title') : goalLoop && goalLoop.max_cycles > 0 ? i18nT('pages.chatSidebar.goal_loop_cycle', { count: goalLoop.cycle_count, total: goalLoop.max_cycles }) : i18nT('pages.chatSidebar.goal_loop_cycle_no_cap', { count: goalLoop?.cycle_count ?? 0 })}>
+          <div className={ROW_STATUS_LINE_CLS} title={goalLoopStalled ? i18nT('pages.chatSidebar.goal_loop_interrupted_title') : goalLoop && goalLoop.maxCycles > 0 ? i18nT('pages.chatSidebar.goal_loop_cycle', { count: goalLoop.cycleCount, total: goalLoop.maxCycles }) : i18nT('pages.chatSidebar.goal_loop_cycle_no_cap', { count: goalLoop?.cycleCount ?? 0 })}>
             <Goal size={ROW_ICON_PX} className={`shrink-0 ${goalLoopStalled ? 'text-danger' : 'text-accent animate-pulse'}`} aria-hidden />
             <span className="truncate"><span className={`font-medium ${goalLoopStalled ? 'text-danger' : 'text-accent'}`}>{goalLoopLabel}{goalLoopStalled ? ` — ${i18nT('pages.chatSidebar.loop_interrupted')}` : ''}</span>{goalLoopDetail ? <span className="text-muted"> · {goalLoopDetail}</span> : null}</span>
           </div>
@@ -1826,7 +1864,7 @@ const SessionRow = memo(function SessionRow({
         // with a definite direction, and rotation reads as progress where a
         // fading dot reads as a mere marker.
         key: 'running',
-        when: isRunning,
+        when: isRunning && (!monitorOwnsRunning || s.running),
         build: () => {
           const text = slotStatusText(statusDetail, simplifiedToolNames, uiLang)
           // `title` because this is the one status text that is unbounded — a tool
@@ -1839,6 +1877,26 @@ const SessionRow = memo(function SessionRow({
             </div>
           )
         },
+      },
+      {
+        // Passive monitor state is useful only after stronger row signals have
+        // had their turn. An unread completion wins over retained terminal state.
+        key: 'structured_monitor_passive',
+        when: !!monitor && monitor.active && !monitor.terminal
+          && monitorStatus !== 'action_running' && !isUnread,
+        build: () => (
+          <div className={ROW_STATUS_LINE_CLS} title={monitorLabel}>
+            <MonitorRadar
+              actionRunning={false}
+              className={monitorStatus === 'success'
+                ? 'text-ok'
+                : monitorStatus === 'blocked' || monitorStatus === 'budget_stopped'
+                  ? 'text-warn'
+                  : 'text-muted'}
+            />
+            <span className="truncate font-medium">{monitorLabel}</span>
+          </div>
+        ),
       },
     ] as const).find(entry => entry.when)?.build() ?? null
 
@@ -2872,12 +2930,17 @@ function ChatSidebar({
   // state lanes, so it subscribes at key granularity (shallowEqual on key
   // arrays): a mid-loop cycle-count bump or a workflow phase update re-renders
   // one row, never the whole sidebar.
-  const goalLoopKeys = useAppSelector(selectGoalLoopKeys, shallowEqual)
-  const goalLoopSet = useMemo(() => new Set(goalLoopKeys), [goalLoopKeys])
   // Keys are NORMALIZED session keys (normalizeRunSessionKey) — membership
   // tests must normalize the slot key the same way.
   const workflowActiveKeys = useAppSelector(selectSidebarWorkflowActiveKeys, shallowEqual)
   const workflowActiveSet = useMemo(() => new Set(workflowActiveKeys), [workflowActiveKeys])
+  // As above, the shell needs only active automation membership. A probe count
+  // or terminal detail update re-renders its row without repainting the list.
+  const automationRunningKeys = useAppSelector(selectSidebarAutomationRunningKeys, shallowEqual)
+  const automationRunningSet = useMemo(
+    () => new Set(automationRunningKeys),
+    [automationRunningKeys],
+  )
   // NOT dashboardSlice.subagentRunning — that only broadcasts on "done", not spawn.
   const subagentCounts = useAppSelector(selectSidebarSubagentCounts, shallowEqual)
   // Spawn approvals (pending + approval_id) — surfaced here since background chats have no inline prompt.
@@ -2962,11 +3025,13 @@ function ChatSidebar({
     for (const s of slots) {
       // Set membership over selector-produced keys is own-property by
       // construction (Object.keys), so no safeKey guard is needed here.
-      const looping = goalLoopSet.has(s.key)
-      if (s.running || workflowActiveSet.has(normalizeRunSessionKey(s.key)) || looping) out.add(s.key)
+      const automationRunning = automationRunningSet.has(s.key)
+      if (s.running
+        || workflowActiveSet.has(normalizeRunSessionKey(s.key))
+        || automationRunning) out.add(s.key)
     }
     return out
-  }, [slots, workflowActiveSet, goalLoopSet])
+  }, [slots, workflowActiveSet, automationRunningSet])
   // A running turn is recent BY DEFINITION: the ordering key stops advancing
   // mid-turn, so a long turn would age out while it is the busiest row on screen.
   const recentSet = useMemo<Set<string>>(() => {
@@ -3039,6 +3104,18 @@ function ChatSidebar({
     try { return new URLSearchParams(window.location.search).get('history') === '1' }
     catch { return false }
   })
+  // The main session search is the broad entry point. Carry it into Older
+  // Sessions when that pane opens, then keep following it while both controls
+  // are visible. The history field can still be refined independently: only a
+  // later edit to the main search intentionally replaces that refinement.
+  const openHistoryPane = useCallback(() => {
+    setHistoryFilter(slotFilter)
+    setHistoryOpen(true)
+    dispatch(fetchHistory(false))
+  }, [dispatch, slotFilter])
+  useEffect(() => {
+    if (historyOpen) setHistoryFilter(slotFilter)
+  }, [historyOpen, slotFilter])
   // The toggle below fetches when it OPENS the pane, so a pane that starts open
   // has never fetched and would render its empty state over real history.
   useEffect(() => {
@@ -3375,7 +3452,7 @@ function ChatSidebar({
       <button
         type="button"
         data-testid={`older-sessions-hint-${lane}`}
-        onClick={() => { setHistoryOpen(true); dispatch(fetchHistory(false)) }}
+        onClick={openHistoryPane}
         className="mt-1 mx-1 px-2 py-1.5 text-left text-[12px] text-muted hover:text-accent hover:bg-accent-subtle rounded-md cursor-pointer bg-transparent border-none transition-colors"
       >
         {i18nT('pages.chatSidebar.show_all_older_sessions')}
@@ -3787,7 +3864,7 @@ function ChatSidebar({
       return inferLane(slot, {
         subagentAwaiting: Math.min(subagentApprovalCounts[slot.key] || 0, running),
         workflowActive: workflowActiveSet.has(normalizeRunSessionKey(slot.key)),
-        goalLoopActive: goalLoopSet.has(slot.key),
+        goalLoopActive: automationRunningSet.has(slot.key),
         detailedSubagentsRunning: running > 0,
       }) === col.state_key
     }
@@ -3799,7 +3876,7 @@ function ChatSidebar({
     if (col.mode === 'all') return col.tag_ids.every(t => set.has(t))
     if (col.mode === 'none') return !col.tag_ids.some(t => set.has(t))
     return col.tag_ids.some(t => set.has(t))  // 'any'
-  }, [subagentApprovalCounts, subagentCounts, goalLoopSet, workflowActiveSet])
+  }, [subagentApprovalCounts, subagentCounts, automationRunningSet, workflowActiveSet])
 
   const slotFolders = useMemo(() => {
     const valid = new Set(folders.map(f => f.id))
@@ -5394,12 +5471,22 @@ function ChatSidebar({
   const startsAutomaticSection = useCallback((list: readonly Slot[], index: number) => (
     !searchRanked && index > 0 && pinned.has(list[index - 1].key) && !pinned.has(list[index].key)
   ), [searchRanked, pinned])
+  // Read through a ref, not the dependency array: `slotFolders` and
+  // `pinnedOrder` are rebuilt whenever the slot list changes, so a callback
+  // closing over them takes a new identity on EVERY slots frame — and this
+  // callback is a prop of every SessionRow, so one unstable reference voids
+  // all N memo boundaries per frame and defeats both the row memo and the
+  // displacement window for any membership change. The handler runs only on
+  // a keypress, where the latest values are what it wants anyway.
+  const keyboardReorderInputsRef = useRef({ searchRanked, pinnedOrder, slotFolders, reorderPinned })
+  keyboardReorderInputsRef.current = { searchRanked, pinnedOrder, slotFolders, reorderPinned }
   const reorderPinnedByKeyboard = useCallback((
     key: string,
     container: string,
     delta: -1 | 1,
     row: HTMLElement,
   ) => {
+    const { searchRanked, pinnedOrder, slotFolders, reorderPinned } = keyboardReorderInputsRef.current
     if (searchRanked) return
     const rendered = new Set(sessionRowsInScope(row).map(el => el.dataset.sessionRow || ''))
     const peers = pinnedOrder.filter(candidate => rendered.has(candidate) && (container === 'flat'
@@ -5408,13 +5495,16 @@ function ChatSidebar({
     const target = peers[index + delta]
     if (index < 0 || !target) return
     reorderPinned(key, target)
-  }, [searchRanked, pinnedOrder, slotFolders, reorderPinned])
+  }, [])
 
   let sessionRowOrderStamp = 0
   const renderSessionRow = (s: Slot, _indent: number, showDivider: boolean, scope = 'list', navScope = scope, holdContainer = navScope) => {
     const renamingHere = renamingSlot === s.key && renameScope === scope
+    // Clamped, not raw: rows past the window share a stamp and bail out of a
+    // displacement above them (see SIDEBAR_DISPLACEMENT_WINDOW).
+    const orderStamp = Math.min(sessionRowOrderStamp++, SIDEBAR_DISPLACEMENT_WINDOW)
     return (
-      <SessionRow key={s.key} slot={s} orderStamp={sessionRowOrderStamp++}
+      <SessionRow key={s.key} slot={s} orderStamp={orderStamp}
         showDivider={showDivider} scope={scope} navScope={navScope} holdContainer={holdContainer}
         isActive={activeSlot === s.key} connected={connected} isOut={poppedOut.has(s.key)}
         isPinned={pinned.has(s.key)} isUnread={unreadSet.has(s.key)} isRunning={runningSet.has(s.key)}
@@ -6066,7 +6156,12 @@ function ChatSidebar({
                  *  is not released, so the menu does not offer it unless the
                  *  operator opted in at Settings > Developer > Feature Previews. The
                  *  mutation above stays wired either way, so a session already in
-                 *  crew mode is unaffected — only this ingress disappears. */}
+                 *  crew mode is unaffected — only this ingress disappears.
+                 *
+                 *  CAPTURED: the Feature Previews "See what it looks like" dialog
+                 *  shows a GIF of this menu opening with this entry. A visible
+                 *  change to the menu or the entry makes that picture stale —
+                 *  re-shoot with `scripts/capture-feature-previews.mjs`. */}
                 {crewPreview && (
                 <DropdownMenuItem className="items-start" data-testid="new-crew-chat" onClick={() => { createCrewMutation.mutate() }}>
                   <Users size={14} className="text-muted mt-[3px] shrink-0" />
@@ -7461,8 +7556,8 @@ function ChatSidebar({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) dispatch(fetchHistory(false)) }}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen(!historyOpen); if (!historyOpen) dispatch(fetchHistory(false)) } }}
+        onClick={() => { if (historyOpen) setHistoryOpen(false); else openHistoryPane() }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (historyOpen) setHistoryOpen(false); else openHistoryPane() } }}
         /* pt/pb are 14px, not py-3, so this row's top border lands on the same
            baseline as the nav rail's community row ("Star us · Report issue"):
            both cards sit 8px off the shell floor, the rail spends 8+2+24+10 =

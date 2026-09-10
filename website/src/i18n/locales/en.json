@@ -2054,8 +2054,8 @@
         "title": "Action Approval",
         "tool": "Tool",
         "trust_all_base": "Trust all {{base}} commands",
-        "trust_all_tools": "Trust all tools",
-        "trust_hint": "Trust also auto-approves {{tool}} from now on.",
+        "trust_all_tools": "Trust all tools for this session",
+        "trust_hint": "Trust auto-approves every tool for the rest of this session.",
         "trust_this_command": "Trust “{{cmd}}”",
         "trusted": "Trusted"
       },
@@ -3869,6 +3869,8 @@
         "add_accounts_title": "Add accounts",
         "add_accounts_summary": "Register more of this machine's AWS profiles",
         "add_accounts_intro": "These local AWS profiles aren't registered yet. Each one you add becomes a key under its account.",
+        "add_accounts_search_placeholder": "Search profiles",
+        "add_accounts_search_keeps_selected": "Profiles you've selected stay listed even when they don't match.",
         "add_accounts_none": "Every local profile is already registered.",
         "add_accounts_unsupported": "AWS Control can't reach this machine's AWS profiles on Windows: its AWS access needs a Linux or macOS shell. Run the {{productName}} gateway under WSL (Windows Subsystem for Linux), then register the profiles you set up there.",
         "add_accounts_count_one": "{{count}} of {{max}} registered",
@@ -4032,6 +4034,7 @@
       "this_app_provides_agents_and_skills_but_no_visua": "This app provides agents and skills but no visual interface.\n            Use its agents from chat."
     },
     "approvalCard": {
+      "actions_group": "Approval actions",
       "approve": "Approve",
       "approved": "Approved",
       "reject": "Reject",
@@ -4216,7 +4219,7 @@
       "stopping_2": "Stopping",
       "taking_longer_than_expected": "taking longer than expected",
       "total": "Total",
-      "trust_reads": "Trust reads",
+      "trust_reads": "Trust read-only commands",
       "turn_interrupted_press_continue": "Last turn was interrupted — press Resume, or just type",
       "upload_file": "Upload file",
       "use_a_skill": "Use a skill",
@@ -4382,6 +4385,13 @@
       "timeout": "Timeout",
       "timestamp": "Timestamp",
       "trigger": "Trigger"
+    },
+    "exportSessionItem": {
+      "export_to_file": "Export to a file",
+      "exported": "Exported",
+      "failed": "Failed",
+      "not_saved_to_disk": "session not saved to disk",
+      "unknown_error": "The export failed"
     },
     "fileCard": {
       "save": "Save"
@@ -4924,9 +4934,11 @@
       "will_be_removed_on_save": "Will be removed on save."
     },
     "selectionToolbar": {
-      "ask": "Ask in Side Chat",
+      "ask": "Ask about this",
+      "ask_hint": "Opens Side Chat with the selection quoted — nothing is sent until you send, and the main chat is untouched",
       "copy": "Copy",
-      "quote": "Quote"
+      "quote": "Quote",
+      "quote_hint": "Quotes the selection into the composer of this conversation — your reply goes to the main chat"
     },
     "sendToInstanceSubmenu": {
       "failed": "Failed",
@@ -5164,7 +5176,7 @@
     },
     "trustDropdown": {
       "trust": "Trust",
-      "trust_all_tools": "Trust all tools"
+      "trust_all_tools": "Trust all tools for this session"
     },
     "tunnelStatus": {
       "tunnel": "Tunnel"
@@ -6071,7 +6083,14 @@
       },
       "errorCard": {
         "continue": "Continue",
-        "continue_hint": "Resume from where it stopped. Work already written to disk is untouched."
+        "continue_hint": "Resume from where it stopped. Work already written to disk is untouched.",
+        "default_model": "Change default model",
+        "default_model_hint": "Open Settings → Chat → Default Model. New sessions start on this value.",
+        "pick_model": "Choose a model for this session",
+        "pick_model_hint": "Open the model picker and choose one of the models your account can use, then send your message again.",
+        "both_hint": "Do both: “{{pick}}” fixes this session, “{{default}}” stops new sessions from starting on the same model if the default is set to it. Then send your message again.",
+        "elsewhere_hint": "The model picker and Settings → Chat are in the main chat window. Open it to choose a model and change the default model.",
+        "elsewhere_settings_hint": "Settings → Chat is in the main chat window. Open it to change the default model."
       },
       "knowledgePicker": {
         "cancel": "Cancel",
@@ -6116,6 +6135,11 @@
       "noticeCard": {
         "blocked": "Blocked",
         "warning": "Warning"
+      },
+      "compactionCard": {
+        "no_summary": "Done — no summary to show",
+        "summary_hint": "Summary folded — expand to read",
+        "title": "Context compacted"
       },
       "recoveryCard": {
         "action_not_taken": "Action not taken",
@@ -6166,6 +6190,7 @@
         "ask_a_side_question": "Ask a side question",
         "ask_a_side_question_main_agent_keeps_working": "Ask a side question without interrupting the active run. Nothing here is saved to the chat.",
         "context_from": "Context from",
+        "off_record_marker": "Side Chat · not saved to the conversation",
         "refresh_context": "Refresh context",
         "refresh_blocked_queued": "Finish or cancel the queued questions first — refreshing would discard them",
         "refresh_blocked_busy": "Wait for the current answer to finish — refreshing now would discard the pending question",
@@ -6292,6 +6317,7 @@
       "could_not_regenerate": "Couldn't regenerate",
       "could_not_set_the_agent_default_model": "Could not set the agent's default model",
       "could_not_switch_variant": "Couldn't switch version",
+      "side_chat_pane_gone": "Couldn't open a Side Chat for that pane — its session is no longer available: {{error}}",
       "enter_split_view": "Enter split view",
       "esc_to_dismiss": "Esc to dismiss",
       "failed_to_apply_plan": "Failed to apply plan",
@@ -6671,6 +6697,7 @@
       "user": "user"
     },
     "kiroCrewAgentsPage": {
+      "add_crew_member": "Add crew member",
       "additional_stores_coming_with_memory_v2": "Only the default store is available today — support for more memory stores is coming soon.",
       "agents": "Agents",
       "also_used_by_these_crews": "Also used by {{crews}}. Agents that share a store can read each other’s files and memory.",
@@ -6684,6 +6711,7 @@
       "create_a_crew_to_give_an_agent_its_own_workspace": "An agent is an assistant with its own files and its own memory. Make one per kind of work so they never mix up what they have learned.",
       "create_a_new_crew": "Create a new agent",
       "create_agent": "Create Agent",
+      "create_member": "Create member",
       "create_workspace": "Create Workspace",
       "create_your_first_crew": "Create your first agent",
       "crew_column": "Agent",
@@ -6708,6 +6736,7 @@
       "effort_pin_needs_a_model": "This effort is ignored until a model is chosen: pick one above, or set a default.",
       "effort_resolves_to": "Thinking at {{effort}}",
       "effort_unavailable_on_this_model": "{{model}} takes no reasoning effort, so there is none to set.",
+      "failed_to_create_member": "Failed to create member",
       "filter_agents": "Filter agents…",
       "finish_the_new_schedule_first": "Finish or cancel the new schedule first",
       "identity": "Basics",
@@ -6716,7 +6745,9 @@
       "isolated_memory_and_files_for_this_crew": "The folder this agent reads and writes. Switch it and new chats start fresh in the new folder; the old one is kept.",
       "keep_editing": "Keep editing",
       "manage_agent_workspace_memory_store_bindings": "Separate assistants for separate jobs. Each agent keeps its own files.",
+      "member_already_exists": "A member named '{{name}}' already exists. Choose another name.",
       "memory_store": "Memory Store",
+      "memory_store_hint_member": "Which memory store this member is bound to. The binding is recorded, but it does not give the member a memory of its own yet.",
       "model": "Model",
       "name": "Name",
       "new_crew": "New agent",
@@ -6734,12 +6765,16 @@
       "resolves_to": "Using {{model}}",
       "routing": "Routing",
       "runtime_binding": "What this agent uses",
+      "runtime_binding_member": "What this member uses",
       "save_changes": "Save changes",
       "shared_lower": "shared",
+      "template_hint_member": "The starting setup this member uses — its tools, connections and instructions.",
       "the_agent_definition_it_boots_from_tools_mcp_ser": "The starting setup this agent uses — its tools, connections and instructions.",
       "triggers": "Triggers",
       "triggers_hint": "When to route to this agent — free-text guidance the orchestrator reads to pick it. Leave empty to exclude this agent from automatic selection.",
+      "triggers_hint_member": "When to hand work to this member — free-text guidance {{productName}} reads to decide. Leave empty to exclude this member from automatic selection.",
       "triggers_info": "When your message clearly matches these triggers, the orchestrator selects this agent (via the select_crew tool) and runs the task with the agent's workspace, memory, and model. Agents with no triggers are never auto-selected.",
+      "triggers_info_member": "When your message clearly matches these triggers, {{productName}} selects this member and runs the task with the member's workspace, memory, and model. Members with no triggers are never auto-selected.",
       "triggers_placeholder": "e.g. incidents, prod outages, pager escalations",
       "used_for_all_new_chats": "Used for all new chats",
       "view_cards": "Cards",
@@ -6749,6 +6784,7 @@
       "which_store_its_lessons_and_history_are_written": "Which memory store this agent is bound to. The binding is recorded, but it does not give the agent a memory of its own yet.",
       "workspace": "workspace",
       "workspace_2": "Workspace",
+      "workspace_hint_member": "The folder this member reads and writes. Switch it and new chats start fresh in the new folder; the old one is kept.",
       "yes_delete_it": "Yes, delete it"
     },
     "knowledge": {
@@ -6935,9 +6971,11 @@
     "membersPage": {
       "agent_template": "Agent template",
       "configuration": "Configuration",
+      "crew_summary": "Crew summary",
       "details": "Details",
       "edit_in_crew_manager": "Edit in crew manager",
-      "empty_roster": "No crew members yet. Create a crew in the crew manager to see it here.",
+      "edit_member": "Edit member",
+      "empty_roster": "No crew members yet.",
       "inherited": "Inherited",
       "member_count_one": "{{count}} member",
       "member_count_other": "{{count}} members",
@@ -6952,8 +6990,9 @@
       "roster_load_failed": "Could not load the member roster.",
       "search_members": "Search members…",
       "add_member": "Add member",
-      "slug_collision": "This member shares its identifier with {{name}}, whose thread already owns it. Rename one of the crews to give each its own thread.",
+      "slug_collision": "This member shares its short name with {{name}}, whose conversation already uses it. Rename one of the two members to give each its own conversation.",
       "thread_open_failed": "Could not open this member's conversation.",
+      "thread_repair_failed": "Couldn't reconnect this conversation. Reopen the member to try again.",
       "title": "Crew Members",
       "unread_message": "Unread message",
       "workspace": "Workspace",
@@ -6961,9 +7000,18 @@
       "stat_today": "Today",
       "stat_week": "Past 7 days",
       "recent_activity": "Recent activity",
-      "activity_chat": "Conversation",
-      "activity_routed": "Routed to this member",
+      "activity_chat": "Chat",
+      "activity_routed": "Auto-picked by the orchestrator for a task",
       "activity_empty": "No recorded activity yet.",
+      "activity_chat_count_one": "{{count}} chat",
+      "activity_chat_count_other": "{{count}} chats",
+      "activity_routed_count_one": "{{count}} auto-picked",
+      "activity_routed_count_other": "{{count}} auto-picked",
+      "activity_more_days_one": "Show {{count}} more day",
+      "activity_more_days_other": "Show {{count}} more days",
+      "activity_capped": "Only the most recent events are loaded; the oldest day shown may be incomplete.",
+      "activity_projects_more_one": "{{name}} & {{count}} more",
+      "activity_projects_more_other": "{{name}} & {{count}} more",
       "wake_sources": "Wake sources",
       "open_schedule": "Open Schedule",
       "wake_none": "Nothing wakes this member automatically.",
@@ -6995,7 +7043,6 @@
       "patrol_error": "Couldn't load this member's patrol status.",
       "patrol_error_roster": "Couldn't load patrol status for the roster.",
       "patrol_badge": "On patrol · {{cycle}}",
-      "patrol_badge_stopped": "Patrol stopped",
       "patrol_next_in": "Due in {{time}}",
       "wake_patrol_every": "Every {{every}}",
       "filter_starred": "Starred",
@@ -7045,9 +7092,7 @@
     },
     "overview": {
       "agentCfgTab": {
-        "after_saving_use": "After saving, use",
         "agent_config_json": "Agent config JSON",
-        "apply_restart_sessions_at_the_top_to_apply_chang": "Apply & Restart Sessions at the top to apply changes.",
         "invalid_json": "Invalid JSON",
         "loading": "Loading…",
         "save_failed": "Save failed",
@@ -7452,7 +7497,7 @@
         "active_projects": "Projects you worked on",
         "coding_time": "Coding time",
         "connect_body": "WakaTime is a free tool that tracks the time you spend coding in your editor.",
-        "connect_hint": "Add a secret named WAKATIME_API_KEY in Settings and set wakatime.enabled to true in your config. Get a key at wakatime.com/settings/account.",
+        "connect_hint": "Set wakatime.enabled to true in $KIROCREW_HOME/config.json (default ~/.kiro/crew/config.json), then in Settings → Secrets set the WakaTime API key under Used automatically by {{productName}}. Get a key at wakatime.com/settings/account.",
         "connect_title": "Connect WakaTime",
         "daily_average": "Average per day",
         "export_csv": "Export hours (CSV)",
@@ -8596,7 +8641,11 @@
         "stopping": "Stopping…",
         "starting": "Starting…",
         "changed_outside_this_form": "This instance changed outside this form ({{fields}}). Check the row above — if it is not the instance you started editing, cancel.",
-        "use_my_edits_anyway": "Apply my edits to the instance as it is now"
+        "use_my_edits_anyway": "Apply my edits to the instance as it is now",
+        "provisioner_choose": "Where should the new instance run?",
+        "provisioner_stale_choice": "The instance type you used before ({{label}} was chosen for you) is no longer offered by this gateway.",
+        "provisioner_none_drawable": "This gateway offers no way to create an instance that this dashboard can draw. Update the dashboard, or ask your administrator which provisioner to use.",
+        "provisioners_unavailable": "Could not read which ways of creating an instance this gateway offers. The built-in AWS launcher is shown."
       },
       "webhooksPanel": {
         "inbound_webhooks": "Inbound webhooks",
@@ -8924,7 +8973,7 @@
       "add_secret": "Add secret",
       "name_label": "Name",
       "value_label": "Value",
-      "delete_confirm": "Delete this secret?",
+      "delete_confirm": "Permanently delete “{{name}}”? The current value cannot be recovered.",
       "delete": "Delete",
       "cancel": "Cancel",
       "save": "Save",

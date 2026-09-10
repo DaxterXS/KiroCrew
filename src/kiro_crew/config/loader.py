@@ -21,6 +21,7 @@ import os
 import re as _re
 import shutil
 import stat as _stat
+import sys
 import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
@@ -35,7 +36,7 @@ from urllib.parse import urlsplit as _urlsplit  # noqa: F401 - compatibility fac
 # so new resolution helpers are reached through the module, not re-exported.
 import kiro_crew.config.resolution as _resolution
 from kiro_crew import __version__, model_registry, platform_compat, windows_acl
-from kiro_crew.acp_backends import ACP_BACKEND_CLAUDE
+from kiro_crew.agent_sdk.capabilities import MODEL_NAMESPACE_ACP, capabilities_for
 
 # Leaf module (stdlib + platform_compat only) — no import cycle with config.
 from kiro_crew.atomic_write import atomic_write, on_event_loop
@@ -173,6 +174,7 @@ from kiro_crew.config.sections import (  # noqa: F401
     FOLDER_INGEST_CHUNK_BUDGET_MAX,
     FORWARD_DECLARED_ENV_DEFAULT,
     IMESSAGE_SERVICES,
+    IMPORT_CHUNK_BUDGET_MAX,
     JAIL_MODE_AUTO,
     JAIL_MODE_OFF,
     JAIL_MODE_ON,
@@ -377,6 +379,11 @@ CRED_WEIXIN_TOKEN = "WEIXIN_TOKEN"  # iLink bot credential from the Settings QR 
 CRED_FEISHU_APP_ID = "FEISHU_APP_ID"  # Feishu custom-app id (developer console)
 CRED_FEISHU_APP_SECRET = "FEISHU_APP_SECRET"
 CRED_JIRA_API_TOKEN = "JIRA_API_TOKEN"  # Jira Cloud/Server API token (resolved from .env)
+CRED_WAKATIME_API_KEY = "WAKATIME_API_KEY"  # vault-only; never loaded from .env
+MANAGED_VAULT_FIXED_CONSUMERS = {
+    CRED_JIRA_API_TOKEN: "jira_api_token",
+    CRED_WAKATIME_API_KEY: "wakatime_api_key",
+}
 # kiro-cli's OWN model credential. Unlike the gateway-owned channel tokens
 # above, its rightful consumer is the agent subprocess itself (and the whoami
 # identity probe), so it is deliberately NOT in sandbox._AGENT_DENIED_ENV_KEYS:
@@ -407,6 +414,24 @@ _CREDENTIAL_KEYS = (
 # injected via multiline env values from reaching the eval-based value reader
 # in the Docker entrypoint.
 _JIRA_TOKEN_RE = _re.compile(r"^JIRA_TOKEN_[0-9A-Fa-f]+$")
+
+
+def normalize_jira_host(host: str) -> str:
+    """Normalize a Jira host exactly as auth lookup and managed-slot discovery do."""
+    return host.strip().lower().removesuffix(":443")
+
+
+def jira_host_token_name(host: str) -> str:
+    """Return the collision-free per-host Jira token name for *host*."""
+    normalized = normalize_jira_host(host)
+    return f"JIRA_TOKEN_{normalized.encode().hex().upper()}"
+
+
+def jira_global_token_applicable(entries: Iterable[JiraAuthEntry]) -> bool:
+    """Whether the global Jira token may serve one valid configured host."""
+    raw_entries = list(entries)
+    return len(raw_entries) == 1 and bool(normalize_jira_host(raw_entries[0].host))
+
 
 # Keys from .env that were already warned about (fire once per gateway boot).
 _warned_env_keys: set[str] = set()
@@ -499,6 +524,63 @@ def config_local_path() -> Path:
     return config_dir() / "config.local.json"
 
 
+def unsandboxed_exec_platform_default() -> bool:
+    """What an UNDECLARED ``agent.sandbox_allow_unsandboxed_exec`` resolves to here.
+
+    True on Windows, where Kiro Crew has no native OS wrapper to apply — no Linux
+    user namespace, no macOS ``sandbox-exec``, and nothing installable that would
+    produce one, so fail-closing there refuses every script cron, hook, app
+    backend, MCP probe and provider CLI on the platform in perpetuity, with no
+    operator action able to satisfy the check.
+
+    False everywhere else. A backend-less Linux or macOS host is one whose backend
+    is BROKEN or one AppArmor profile away from working, so it keeps fail-closing
+    and ``sandbox``'s guidance names the profile that restores isolation; running
+    unconfined there would hide a repairable host.
+
+    Resolved HERE, into the dataclass value, rather than downstream from whether
+    the key is present. Presence cannot carry the meaning safely:
+    :meth:`KiroCrewConfig.save` publishes the whole in-memory snapshot through
+    ``to_dict()`` -> ``asdict(self.agent)``, so every full-document write (the boot
+    default-config write, CLI one-shots) materializes this key. Were the effective
+    policy keyed on presence, that write would silently turn "never decided" into a
+    declared lockdown and re-brick every Windows spawn. Resolving into the value
+    makes such a round-trip write ``true`` on Windows, which changes nothing.
+
+    A function rather than a module constant so tests can pin the verdict without
+    patching ``sys.platform`` process-wide.
+    """
+    return sys.platform == "win32"
+
+
+def unsandboxed_exec_declared() -> bool:
+    """Whether the operator explicitly DECLARED ``agent.sandbox_allow_unsandboxed_exec``.
+
+    Reports key PRESENCE, in either state, in ``config.json`` or the
+    ``config.local.json`` overlay that deep-merges over it.
+
+    DIAGNOSTIC ONLY — it must never gate execution. The effective policy is the
+    resolved dataclass value (see :func:`unsandboxed_exec_platform_default`); this
+    exists so a message can tell "you set this to false" apart from "you never set
+    it", and so the audit event can name an operator grant rather than a platform
+    one. Because a full-document ``save()`` materializes the key, a host that never
+    answered can read as declared afterwards — acceptable for a label, and the
+    reason this must not decide anything.
+
+    An unreadable or non-object document contributes nothing: a corrupt config is
+    not a declaration.
+    """
+    for path in (config_path(), config_local_path()):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        agent = doc.get("agent") if isinstance(doc, dict) else None
+        if isinstance(agent, dict) and "sandbox_allow_unsandboxed_exec" in agent:
+            return True
+    return False
+
+
 def _inside_data_home(path: Path) -> bool:
     """Whether *path* lives in ``config_dir()``, the one directory we own.
 
@@ -572,6 +654,18 @@ def _write_migration_backup(path: Path) -> None:
 MIGRATE_WORKSPACES = "workspaces"
 MIGRATE_AGENTS = "agents"
 MIGRATE_DEFAULT_AGENT = "default_agent"
+MIGRATE_CONNECTIONS_UI = "connections_ui"
+
+#: Sidecar marker recording that the one-shot ``connections_ui`` launch
+#: migration ran. Pre-launch builds materialized ``connections_ui: false`` into
+#: every config they saved (the key was the opt-in gate then, so a stored false
+#: was default noise, never a choice); post-launch the same bytes are the
+#: deliberate opt-out. The marker is the boundary between those two readings:
+#: a stored false found BEFORE it exists is stripped once, and any false found
+#: AFTER it exists is honoured forever. It lives beside ``config.json`` rather
+#: than inside it for the same reason as the superseded-defaults ack file — a
+#: full ``to_dict()`` rewrite carries only schema fields and would drop it.
+CONNECTIONS_UI_MIGRATION_MARKER = "connections_ui_migrated.json"
 
 
 def _apply_document_migrations(
@@ -642,6 +736,17 @@ def _apply_document_migrations(
                     )
                 )
             }
+            changed = True
+
+    # Strip the pre-launch materialized ``connections_ui: false``. Re-checked
+    # against *data*: only an exact stored ``false`` is touched, so a concurrent
+    # writer that already removed the key, or set it ``true``, is left alone.
+    # The one-shot boundary (a deliberate post-launch ``false`` must survive
+    # every later load) is enforced by the caller via the marker file — this
+    # delta is only ever pending on a load that found no marker.
+    if MIGRATE_CONNECTIONS_UI in pending:
+        if data.get("connections_ui") is False:
+            del data["connections_ui"]
             changed = True
 
     # Point default_agent at an agent that exists. Resolved against the
@@ -1353,6 +1458,10 @@ def update_config_locked(
         if stamp_meta:
             result = stamp_config_meta(result)
         write_config_atomically(p, result, fsync=fsync)
+        # A same-size replacement can retain an indistinguishable fingerprint
+        # on a coarse-timestamp filesystem. Clear eagerly before reporting the
+        # write complete so the next load cannot serve the pre-write snapshot.
+        _invalidate_config_cache()
         return result
 
 
@@ -1621,9 +1730,11 @@ def strip_kiro_cli_api_key(env: MutableMapping[str, str]) -> MutableMapping[str,
 
     "Foreign process" is no longer the right framing for KAS: Crew reaches it
     through kiro-cli's ACP relay, so the child IS a kiro-cli. The strip still
-    applies because the v3 engine resolves its tokens from kiro-cli's OIDC store
-    (``--auth-method cli``) and never reads this variable — the test is what the
-    child's engine consumes, not which binary it is.
+    applies because the v3 engine resolves its tokens either from kiro-cli's
+    OIDC store (``--auth-method cli``) or from Crew's own vault over its
+    ``_kiro/auth/getAccessToken`` callback, and an API key in its environment
+    would take precedence over both — the test is what the child's engine
+    consumes, not which binary it is.
 
     Matches the platform env-key convention (exact on POSIX, case-folded on
     Windows) so a differently-cased Windows spelling cannot slip past. Mutates
@@ -1737,6 +1848,14 @@ def _subagent_timeout_from(raw: object) -> int:
     """
     value = _safe_int(raw, SUBAGENT_TIMEOUT_SECS, 0, SUBAGENT_TIMEOUT_MAX)
     return value if value == 0 else max(SUBAGENT_TIMEOUT_MIN, value)
+
+
+_DEFAULT_MEMORY_MODES = frozenset({"persistent", "incognito", "temporary"})
+
+
+def _default_memory_mode_from(raw: object) -> str:
+    """Normalize a stored dashboard default without failing open on corruption."""
+    return raw if isinstance(raw, str) and raw in _DEFAULT_MEMORY_MODES else "temporary"
 
 
 # (section, key, min, max) for each bounded field clamped at load time. The
@@ -1951,15 +2070,27 @@ def _clamp_security_bounds(data: dict) -> None:
 def _config_fingerprint() -> tuple:
     """Cheap signature of the config files — changes whenever either is edited.
 
-    Uses st_mtime_ns + st_size + st_mode for both config.json and
-    config.local.json so any edit, truncation, or replacement busts the cache.
-    A missing file contributes a sentinel so create/delete also busts it.
+    Includes replacement identity (device + inode) and change time in addition
+    to mtime, size, and mode. Dashboard/CLI writers publish with atomic rename;
+    on a coarse-timestamp filesystem an Incognito→Temporary replacement can
+    otherwise keep the same mtime and size, making another process's cache look
+    current. A missing file contributes a sentinel so create/delete also busts.
     """
     sig: list = []
     for p in (config_path(), config_local_path()):
         try:
             st = p.stat()
-            sig.append((str(p), st.st_mtime_ns, st.st_size, st.st_mode))
+            sig.append(
+                (
+                    str(p),
+                    st.st_dev,
+                    st.st_ino,
+                    st.st_ctime_ns,
+                    st.st_mtime_ns,
+                    st.st_size,
+                    st.st_mode,
+                )
+            )
         except OSError:
             sig.append((str(p), None))
     return tuple(sig)
@@ -1980,9 +2111,20 @@ def _cached_validated_data(fp: tuple | None = None) -> dict | None:
     return _CONFIG_CACHE.get(fp if fp is not None else _config_fingerprint())
 
 
-def _store_validated_data(data: dict, fp: tuple, sidecar: dict | None = None) -> None:
-    """Cache a deep copy of *data* (+ *sidecar*) under *fp* (see ConfigCache.store)."""
-    _CONFIG_CACHE.store(data, fp, sidecar)
+def _store_validated_data(
+    data: dict,
+    fp: tuple,
+    sidecar: dict | None = None,
+    *,
+    expected_generation: int | None = None,
+) -> None:
+    """Cache validated data unless a write invalidated its disk-read generation."""
+    _CONFIG_CACHE.store(
+        data,
+        fp,
+        sidecar,
+        expected_generation=expected_generation,
+    )
 
 
 #: Sidecar key under which the loader caches the pre-overlay base values of the
@@ -2469,10 +2611,14 @@ class KiroCrewConfig:
             data, sidecar = cached
             base_shadow = sidecar.get(_SIDECAR_BASE_SHADOW, {})
         else:
+            # Capture the invalidation generation BEFORE disk I/O. A successful
+            # write advances it, so this read cannot repopulate pre-write data
+            # after the writer clears the cache even if the filesystem's coarse
+            # timestamp and unchanged size leave the fingerprint identical.
+            read_generation = _CONFIG_CACHE.generation()
             # fp was captured BEFORE reading, so a write landing during the read
-            # is detected: we cache under it, it won't match the post-write
-            # on-disk stat, and the next load() re-reads instead of serving
-            # content read mid-write (read->store TOCTOU).
+            # is detected: the fingerprint normally changes, and the generation
+            # fence covers filesystems where a same-size replacement does not.
             # _store_validated_data documents this contract.
             pre_read_fp = fp
             data = {}
@@ -2556,6 +2702,11 @@ class KiroCrewConfig:
                 # could not read what they configured". Carry the observation
                 # through so the caller can tell them apart (#4057).
                 cfg = cls(_degraded_sections=frozenset(_OBSERVED_DEGRADED_SECTIONS))
+                if (
+                    DEGRADED_WHOLE_CONFIG in _OBSERVED_DEGRADED_SECTIONS
+                    or "dashboard" in _OBSERVED_DEGRADED_SECTIONS
+                ):
+                    cfg.dashboard.default_memory_mode = "temporary"
                 cfg.skills.project_skills_enabled = (
                     data.get("skills", {}).get("project_skills_enabled", True) is True
                 )
@@ -2598,6 +2749,15 @@ class KiroCrewConfig:
             if isinstance(_agent_section, dict) and "member_dispatch" in _agent_section:
                 if not isinstance(_agent_section["member_dispatch"], bool):
                     _agent_section["member_dispatch"] = False
+            # Keep a genuinely absent default backward-compatible with older
+            # configs, but normalize a PRESENT malformed value before advisory
+            # schema validation can delete it and turn corruption into the
+            # missing-field Persistent default.
+            _dashboard_section = data.get("dashboard")
+            if isinstance(_dashboard_section, dict) and "default_memory_mode" in _dashboard_section:
+                _dashboard_section["default_memory_mode"] = _default_memory_mode_from(
+                    _dashboard_section["default_memory_mode"]
+                )
             # Validate against JSON Schema (advisory — never fatal)
             _validate_config_data(data)
             # Clamp security-relevant resource-limit knobs to their API ceilings
@@ -2605,11 +2765,17 @@ class KiroCrewConfig:
             # exceeds a ceiling cannot drive resource exhaustion (DoS). Runs only
             # on the disk-read path; cache hits below already serve clamped values.
             _clamp_security_bounds(data)
-            # Cache the validated, merged dict under the PRE-read fingerprint so
-            # a mid-read write self-heals (next load misses and re-reads). The
-            # base shadow rides along so a hit can capture unknown keys from the
-            # base document exactly as this disk read did.
-            _store_validated_data(data, pre_read_fp, {_SIDECAR_BASE_SHADOW: base_shadow})
+            # Cache under the PRE-read fingerprint and generation. A mid-read
+            # write either changes the fingerprint or advances the generation;
+            # both paths force the next load to re-read. The base shadow rides
+            # along so a hit can capture unknown keys from the base document
+            # exactly as this disk read did.
+            _store_validated_data(
+                data,
+                pre_read_fp,
+                {_SIDECAR_BASE_SHADOW: base_shadow},
+                expected_generation=read_generation,
+            )
 
         # Collected during the parse that discards them — the only moment the
         # evidence exists, since the migration below rewrites config.json in
@@ -2675,6 +2841,17 @@ class KiroCrewConfig:
         _wecom_key = "wecom" if "wecom" in data else "wechat"
         wecom_data = _coerced_section(data, _wecom_key, _degraded)
         dashboard_data = _coerced_section(data, "dashboard", _degraded)
+        # Persistent is the compatibility default only when a readable config
+        # genuinely omits this field. If the dashboard section or either config
+        # file was unreadable, the missing value may have been a privacy choice
+        # we could not recover, so new chats must fail closed to Temporary until
+        # the operator fixes the file and restarts the gateway.
+        if (
+            "dashboard" in _degraded
+            or "dashboard" in _OBSERVED_DEGRADED_SECTIONS
+            or DEGRADED_WHOLE_CONFIG in _OBSERVED_DEGRADED_SECTIONS
+        ):
+            dashboard_data["default_memory_mode"] = "temporary"
         stt_data = _coerced_section(data, "stt", _degraded)
         computer_use_data = _coerced_section(data, "computer_use", _degraded)
         instances_data = _coerced_section(data, "instances", _degraded)
@@ -2822,7 +2999,10 @@ class KiroCrewConfig:
                     agent_data.get("sandbox_allow_no_isolation", False)
                 ),
                 sandbox_allow_unsandboxed_exec=bool(
-                    agent_data.get("sandbox_allow_unsandboxed_exec", False)
+                    agent_data.get(
+                        "sandbox_allow_unsandboxed_exec",
+                        unsandboxed_exec_platform_default(),
+                    )
                 ),
                 apps_allow_third_party=_safe_bool(
                     agent_data.get("apps_allow_third_party", False), False
@@ -3170,6 +3350,11 @@ class KiroCrewConfig:
                     500,
                     SWEEP_CHUNK_BUDGET_MAX,
                 ),
+                import_chunk_budget=_safe_nonnegative_int(
+                    knowledge_data.get("import_chunk_budget", 0),
+                    0,
+                    IMPORT_CHUNK_BUDGET_MAX,
+                ),
                 embed_rate_limit=_safe_nonnegative_int(
                     knowledge_data.get("embed_rate_limit", 120), 120, EMBED_RATE_LIMIT_MAX
                 ),
@@ -3431,6 +3616,9 @@ class KiroCrewConfig:
                 auto_open_git_panel=_safe_bool(dashboard_data.get("auto_open_git_panel"), False),
                 session_card_source_links=_safe_bool(
                     dashboard_data.get("session_card_source_links"), True
+                ),
+                default_memory_mode=_default_memory_mode_from(
+                    dashboard_data.get("default_memory_mode", "persistent")
                 ),
                 widget_density=dashboard_data.get("widget_density", "more"),
                 use_builtin_browser=_safe_bool(dashboard_data.get("use_builtin_browser"), True),
@@ -3883,10 +4071,25 @@ class KiroCrewConfig:
                     cfg.default_agent = "default"
                 pending.add(MIGRATE_DEFAULT_AGENT)
 
+            # One-shot launch migration for ``connections_ui`` (see the marker
+            # constant's docstring). Decided on the BASE document, not the
+            # merged view: the overlay is user-owned prose we never rewrite,
+            # and the stale materialization only ever landed in config.json.
+            connections_marker = config_dir() / CONNECTIONS_UI_MIGRATION_MARKER
+            connections_migrating = False
+            if not connections_marker.exists():
+                if data.get("connections_ui") is False:
+                    # In-memory half: this very load must already serve the
+                    # launch default — the strip below is the on-disk echo.
+                    cfg.connections_ui = True
+                    pending.add(MIGRATE_CONNECTIONS_UI)
+                connections_migrating = True
+
             needs_migration = bool(pending)
 
+            persisted = True
             if needs_migration and not cfg._degraded_sections:
-                _persist_config_migration(
+                persisted = _persist_config_migration(
                     path,
                     frozenset(pending),
                     default_kiro_agent=cfg.agent.default_agent or "kirocrew",
@@ -3906,6 +4109,30 @@ class KiroCrewConfig:
                     "degraded section(s) %s and writing back would erase the "
                     "evidence; fix the file to clear",
                     sorted(cfg._degraded_sections),
+                )
+
+            # Record the connections_ui boundary only after a pass that was
+            # allowed to act on it AND whose write-back actually landed. A
+            # degraded load skips both the strip and the marker; a contended
+            # lock makes _persist_config_migration return False with nothing
+            # written, and the marker MUST defer with the strip — marker
+            # without strip would freeze the stale false as a deliberate
+            # opt-out forever. (The already-migrated-by-another-writer path
+            # also returns False; the marker then lands on the next load,
+            # which finds nothing to strip. One extra boot, same endpoint.)
+            # Failure to write the marker itself is logged and retried next
+            # load — the strip's own condition makes the retry converge.
+            if connections_migrating and persisted and not cfg._degraded_sections:
+                atomic_write(
+                    connections_marker,
+                    json.dumps(
+                        {
+                            "migrated_at": datetime.now(timezone.utc).isoformat(),
+                            "stripped_stale_false": MIGRATE_CONNECTIONS_UI in pending,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
                 )
         except Exception as e:
             # Migration write-back is best-effort; never block startup.
@@ -4051,6 +4278,31 @@ class KiroCrewConfig:
 
         d = self.to_dict()
 
+        # Strip the no-backend exec permission when the operator never DECLARED it.
+        #
+        # ``sandbox_allow_unsandboxed_exec`` is the one field whose ABSENCE is
+        # load-bearing: an absent key resolves through
+        # ``unsandboxed_exec_platform_default()`` (allow where no backend can be
+        # installed, fail-closed elsewhere), and absence is also what tells
+        # ``kirocrew setup`` there is still a decision to surface and the SEL audit
+        # that the platform rather than an operator permitted the spawn. Publishing
+        # a whole-document snapshot materializes every field, so without this strip
+        # any ``save()`` — the boot default-config write, a CLI one-shot — would
+        # freeze the resolved value in as a DECLARATION: writing ``false`` on such a
+        # host refuses every agent subprocess nobody asked to refuse, and writing
+        # ``true`` fakes a consent that was never given, skipping the very prompt
+        # that makes the posture explicit.
+        #
+        # Declaration is read from disk rather than tracked in memory because that is
+        # the same question every other consumer asks
+        # (``unsandboxed_exec_declared()``), so the writer cannot disagree with the
+        # reader about one host. On a fresh install there is no file yet, which reads
+        # as undeclared and is exactly right: the document this call creates should
+        # not contain the key at all.
+        if not unsandboxed_exec_declared():
+            agent_section = d.get("agent")
+            if isinstance(agent_section, dict):
+                agent_section.pop("sandbox_allow_unsandboxed_exec", None)
         # Strip overlay-owned values so they don't leak into config.json
         local_path = config_local_path()
         if local_path.is_file():
@@ -4154,12 +4406,15 @@ class KiroCrewConfig:
         :meth:`_resolve_agent_model` when it is the ``auto`` sentinel).
 
         The result is translated into the namespace of the backend that will
-        actually be asked to run it: ``to_provider_id(…, "claude_code")`` for
-        the claude backend, ``model_registry.to_acp_id`` otherwise (canonical
-        keys become kiro ids). ``auto`` collapses to ``""`` either way.
+        actually be asked to run it, and the namespace is asked for as a
+        CAPABILITY (``SessionCapabilities.model_id_namespace``) rather than
+        inferred from the harness's name: a backend on its own provider namespace
+        goes through ``to_provider_id`` into that namespace, and one on the native
+        ``acp`` namespace goes through ``model_registry.to_acp_id`` (canonical keys
+        become kiro ids). ``auto`` collapses to ``""`` either way.
 
         Keying the translation on the backend is what the warm-pool model-switch
-        path already does (``session_allocation``, via ``is_claude_backend``).
+        path already does (``session_allocation``).
         Hardcoding ``to_acp_id`` here meant a COLD start handed the claude
         adapter a kiro-namespaced id — which its ``set_config_option`` rejects,
         and which nothing withheld, because the pre-wire availability guard is
@@ -4187,8 +4442,9 @@ class KiroCrewConfig:
             m = self._resolve_named_agent_model(agent) or global_model
         if not m:
             return ""
-        if self.agent.acp_backend == ACP_BACKEND_CLAUDE:
-            return model_registry.to_provider_id(m, "claude_code")
+        namespace = capabilities_for(self.agent.acp_backend).model_id_namespace
+        if namespace != MODEL_NAMESPACE_ACP:
+            return model_registry.to_provider_id(m, namespace)
         return model_registry.to_acp_id(m)
 
     def crew_pinned_effort(self, agent: str | None, crew_agent: str | None = None) -> str:

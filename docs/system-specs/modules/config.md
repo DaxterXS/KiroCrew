@@ -81,8 +81,11 @@ Independently, a user who wants the data home entirely outside `~/.kiro/` can se
 **Technical hedge — recovery-pointer breadcrumb.** `config_dir()` writes a small,
 non-secret `~/.kirocrew.breadcrumb` pointer file at the top-level home
 (`RECOVERY_BREADCRUMB_NAME`), deliberately **outside** `~/.kiro/`, recording the
-data-home path (see `_write_recovery_breadcrumb`). It is idempotent (rewritten
-only when the recorded path changes), best-effort (never blocks startup), and
+data-home path (see `_write_recovery_breadcrumb`). It is idempotent where the
+platform can check safely (on POSIX the prior content is read via `O_NOFOLLOW`
+and rewritten only when the recorded path changes; where that flag is missing —
+Windows — the check is skipped and the file is atomically rewritten once per
+process), best-effort (never blocks startup), and
 written only on the default path (a `KIROCREW_HOME` override carries no `~/.kiro/`
 wipe risk). It is **not a backup** — just a durable signpost that survives a
 `~/.kiro/`-wide uninstaller wipe so a user or support script can find any
@@ -1032,6 +1035,7 @@ class TelemetryConfig:
 class DashboardConfig:
     url: str = ""                  # public URL for the dashboard (used in Slack links)
     # ... restore_sessions / bot_name / avatar / widget_density / auto_open_browser / etc.
+    default_memory_mode: str = "persistent"  # persistent | incognito | temporary; default for user-created dashboard chats only
     verbosity: str = "default"     # "default" | "concise" | "ultra"; "concise" injects a brevity guideline block into the agent prompt ({{VERBOSITY_BLOCK}}), "ultra" injects a stricter punchline-first block (answer within a ~3-sentence opening, then scannable detail). Read/written via GET/PUT /api/dashboard/config (rejects values other than default|concise|ultra). Resolved for all transports in ContextBuilder._resolve_prompt_templates; an unrecognized value injects an empty block.
     theme_mode: str = ""           # "dark" | "light" | "system"; empty = unset (frontend falls back to localStorage or "system")
     theme_color: str = ""          # color-theme slug (e.g. "kiro", "emerald", "monokai"); empty = unset
@@ -1085,7 +1089,7 @@ total coercer applied on load, in the create/update endpoints, and nowhere else,
 and it is deliberately NOT re-exported from `loader.py` — the loader's
 `from kiro_crew.config.sections import (...)` list is a frozen pre-split snapshot
 (`test_config_module_boundaries`), so post-split internals are reached through the
-`sections` module. Two accepted shapes:
+`sections` module. Three accepted shapes:
 
 - `{"kind": "ghost", "traits": {eyes, brows, mouth, accessory, prop: str; blush,
   flip: bool; tile: "#rrggbb"}}` — string traits are truncated to 32 chars and
@@ -1106,8 +1110,32 @@ and it is deliberately NOT re-exported from `loader.py` — the loader's
   mtime stamp the frontend appends as `?v=`; `file` pins the exact committed,
   content-addressed variant and must match `^[0-9a-f]{16}\.(png|jpg|webp)$`.
   Wire-only keys (`promote`, `token`) never reach the record.
+- `{"kind": "pack", "id": "<pack id>"}` — the crew wears an appearance pack from
+  the crew library (`GET /api/appearances`, specified in
+  `learn-cron-dashboard.md`, *Crew appearance library*). `id` is validated by
+  `appearance_packs.safe_pack_id`, the SAME function the pack store applies to a
+  directory name, so a value that persists here can always be looked up; a
+  second copy of the character class is what would drift. A junk id collapses the
+  whole override to `{}` rather than storing `{"kind": "pack"}`: a pack avatar IS
+  its id, so an override naming no art has nothing to render. Whether the pack
+  still EXISTS is deliberately not checked — config load must not touch the disk,
+  and a pack deleted out of band would otherwise make the whole config unloadable
+  instead of making one face fall back — so a dangling id renders as the
+  name-derived ghost on the client. **A pack survives a faceless save.** The
+  shipped crew editor rebuilds the override from a closed ghost/picture shape,
+  so for a pack-wearing crew it renders the name-derived face and any unrelated
+  save (a model change, a colour) submits `{}` — or `{"kind": "ghost", ...}`
+  carrying only `expressions`/`sounds` — which read as reset would silently
+  clear a pack set through the API. `PUT /api/agents/{name}` therefore keeps
+  the current pack id when the record is a pack and the save names no face
+  (`handlers/agents._carry_pack_through_faceless_save`), and the save's
+  reactions ride onto the kept pack. It is narrow: ghost and picture keep
+  their reset semantics; `avatar: null` (which the editor never sends) is
+  still an explicit reset that takes the pack off; a real face — a ghost with
+  traits, a picture, another pack — replaces it. The carve-out exists until the
+  picker can display a pack, at which point the editor round-trips it itself.
 
-**Per-state overrides (`expressions`, `sounds`).** Both kinds may carry two
+**Per-state overrides (`expressions`, `sounds`).** All three kinds may carry two
 optional keys, keyed on the agent lifecycle state (`working`, `done`, `error`
 exactly; any other key is dropped, so a version-skewed caller cannot grow the
 key set):

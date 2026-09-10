@@ -2,13 +2,16 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SettingsSection, SettingsCard, SettingsToggle, SettingsSelect, SettingsInput, SettingsButtonGroup } from '../../components/settings'
 import { Btn } from '../../components/ui'
-import { loadChatConfig, saveChatConfig, type ChatConfig, type ContentWidth, type DashboardConfig, type SendMode } from '../chat/ChatSettings'
+import { loadChatConfig, saveChatConfig, type ChatConfig, type ContentWidth, type DashboardConfig, type MemoryMode, type SendMode } from '../chat/ChatSettings'
 import { api } from '../../api/client'
+import { serializeDefaultMemoryModeUpdate } from '../../api/queryClient'
 import { useOptimisticConfigPaths, setConfigPathValue } from './useOptimisticConfigPaths'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { usePlainDiff } from '../../hooks/usePlainDiff'
 import { EFFORT_LEVELS, effortLabel, modelSupportsEffort } from '../../lib/effort'
 import { isMac } from '../../utils/platform'
+import { readBusySendDefault, setBusySendDefault, type BusySendMode } from '../../components/BusySendButton'
+import { platformShortcut } from '../../utils/platform'
 import { capRoleOther, clampRoleOther } from '../../lib/userProfile'
 import { ROLE_SLUGS, TECH_SLUGS } from '../../lib/profileOptions'
 
@@ -68,6 +71,23 @@ const COMPLETION_KEEP_OPTIONS: CompletionKeepMode[] = ['head', 'tail', 'both']
 
 type VerbosityLevel = 'default' | 'concise' | 'ultra' | 'answer_only'
 const VERBOSITY_OPTIONS: VerbosityLevel[] = ['default', 'concise', 'ultra', 'answer_only']
+
+const MEMORY_MODE_OPTIONS: MemoryMode[] = ['persistent', 'incognito', 'temporary']
+const DEFAULT_MEMORY_MODE_PATH = 'dashboardConfig.default_memory_mode'
+
+function memoryModeLabels(): string[] {
+  return [
+    i18nT('settings.chat.defaultMemoryMode.persistent'),
+    i18nT('components.welcomeView.incognito'),
+    i18nT('components.welcomeView.temporary'),
+  ]
+}
+
+function asMemoryMode(value: unknown): MemoryMode {
+  return MEMORY_MODE_OPTIONS.includes(value as MemoryMode)
+    ? value as MemoryMode
+    : 'persistent'
+}
 
 /**
  * Narrow a persisted `dashboard.verbosity` to a level this Select can render.
@@ -160,7 +180,11 @@ export function ChatPanel() {
   // second toggle during a save carries the first one's value forward.
   const dashCfg = overlay.shown(
     'dashboardConfig',
-    dashQ.data ?? { restore_sessions: false, restore_window_minutes: 30, merge_queued_messages: false, widget_density: 'more' as const, verbosity: 'default' as const, quick_send: false, session_grid: false, tail_fork_enabled: false, link_previews: false, mcp_app_panel: false, auto_open_git_panel: false, session_card_source_links: true, folder_suggestions_enabled: true, use_builtin_browser: true },
+    dashQ.data ?? { restore_sessions: false, restore_window_minutes: 30, merge_queued_messages: false, default_memory_mode: 'persistent' as const, widget_density: 'more' as const, verbosity: 'default' as const, quick_send: false, session_grid: false, tail_fork_enabled: false, link_previews: false, mcp_app_panel: false, auto_open_git_panel: false, session_card_source_links: true, folder_suggestions_enabled: true, use_builtin_browser: true },
+  )
+  const shownDefaultMemoryMode = overlay.shown(
+    DEFAULT_MEMORY_MODE_PATH,
+    dashCfg.default_memory_mode,
   )
 
   // ── Feature Tips opt-out (server-side per-user state) ──
@@ -207,6 +231,21 @@ export function ChatPanel() {
     displayValue: patch => ({ ...dashCfg, ...patch }),
     applyToCache: (cached, patch) => ({ ...(cached as DashboardConfig), ...patch }),
     onFailure: () => setPathSaveError('dashboardConfig', i18nT('pages.settings.chatPanel.failed_to_save_dashboard_config')),
+    onSupersede: clearOwnPathError,
+  }))
+  const defaultModeMut = useMutation(overlay.mutationOpts<MemoryMode>({
+    queryKey: ['dashboardConfig'],
+    mutationFn: (value: MemoryMode) => serializeDefaultMemoryModeUpdate(
+      value,
+      () => api.updateDashboardConfig({ default_memory_mode: value }),
+    ),
+    path: () => DEFAULT_MEMORY_MODE_PATH,
+    displayValue: value => value,
+    applyToCache: (cached, value) => ({
+      ...(cached as DashboardConfig),
+      default_memory_mode: value,
+    }),
+    onFailure: () => setPathSaveError(DEFAULT_MEMORY_MODE_PATH, i18nT('pages.settings.chatPanel.failed_to_save_dashboard_config')),
     onSupersede: clearOwnPathError,
   }))
 
@@ -295,6 +334,12 @@ export function ChatPanel() {
   }
 
   const [localBudget, setLocalBudget] = useState('')
+  // What Enter does while the agent is working, for sessions whose split button
+  // was never touched (those keep their own per-slot choice). Persisted by
+  // BusySendButton's default writer, not by ChatConfig: the per-slot choice and
+  // the default must share one storage family or the fallback chain breaks.
+  const [busyDefault, setBusyDefaultState] = useState<BusySendMode>(() => readBusySendDefault())
+  const setBusyDefault = (m: BusySendMode) => { setBusySendDefault(m); setBusyDefaultState(m) }
   const budgetInitRef = useRef(false)
   useEffect(() => {
     if (mcQ.data && !budgetInitRef.current) {
@@ -674,6 +719,18 @@ export function ChatPanel() {
             optionLabels={[i18nT('pages.settings.chatPanel.enter_sends'), i18nT('pages.settings.chatPanel.mod_enter_sends', { mod: isMac ? '⌘' : 'Ctrl' }), i18nT('pages.settings.chatPanel.enter_sends_mod_enter_newline', { mod: isMac ? '⌘' : 'Ctrl' })]}
             onChange={v => setChat('sendOnEnter', v as SendMode)}
           />
+          <SettingsButtonGroup
+            label={i18nT('pages.settings.chatPanel.what_enter_does_while_the_agent_is_working')}
+            description={chatCfg.sendOnEnter === 'enter'
+              ? i18nT('pages.settings.chatPanel.busy_alt_action_desc', { chord: platformShortcut('Cmd+Enter') })
+              : i18nT('pages.settings.chatPanel.busy_alt_action_desc_no_chord')}
+            value={busyDefault}
+            options={[
+              { value: 'steer', label: i18nT('components.chatInput.steer') },
+              { value: 'queue', label: i18nT('components.chatInput.queue') },
+            ]}
+            onChange={v => setBusyDefault(v as BusySendMode)}
+          />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.quick_send')} description={i18nT('pages.settings.chatPanel.click_a_suggested_reply_to_send_it_instantly', { mod: isMac ? '⇧' : 'Shift' })} checked={dashCfg.quick_send} onChange={v => setDash({ quick_send: v })} disabled={dashDisabled} />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.merge_queued_messages')} description={i18nT('pages.settings.chatPanel.combine_follow_up_messages_into_a_single_labeled')} checked={dashCfg.merge_queued_messages} onChange={v => setDash({ merge_queued_messages: v })} disabled={dashDisabled} />
           <SettingsButtonGroup label={i18nT('pages.settings.chatPanel.follow_up_bar_layout')} description={i18nT('pages.settings.chatPanel.multiline_wraps_suggestions_onto_multiple_rows_s')} value={chatCfg.followUpLayout} options={[{ value: "multiline", label: i18nT('pages.settings.chatPanel.multiline') }, { value: "scroll", label: i18nT('pages.settings.chatPanel.single_line') }]} onChange={v => setChat('followUpLayout', v as ChatConfig['followUpLayout'])} />
@@ -753,6 +810,16 @@ export function ChatPanel() {
           <SettingsToggle label={i18nT('pages.settings.chatPanel.history_expanded')} description={i18nT('pages.settings.chatPanel.expand_history_sidebar_by_default')} checked={chatCfg.historyExpanded} onChange={v => setChat('historyExpanded', v)} />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.confirm_before_closing_session')} description={i18nT('pages.settings.chatPanel.show_a_confirmation_dialog_when_closing_a_sessio')} checked={chatCfg.confirmCloseSession} onChange={v => setChat('confirmCloseSession', v)} />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.default_to_autopilot_mode')} description={i18nT('pages.settings.chatPanel.new_sessions_start_in_autopilot_mode_plan_approv')} checked={chatCfg.defaultAutopilot} onChange={v => setChat('defaultAutopilot', v)} />
+          <SettingsSelect
+            label={i18nT('settings.chat.defaultMemoryMode.label')}
+            description={i18nT('settings.chat.defaultMemoryMode.description')}
+            value={asMemoryMode(shownDefaultMemoryMode)}
+            options={MEMORY_MODE_OPTIONS}
+            optionLabels={memoryModeLabels()}
+            onChange={v => defaultModeMut.mutate(v as MemoryMode)}
+            disabled={dashDisabled || defaultModeMut.isPending}
+            configKey="dashboard.default_memory_mode"
+          />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.tail_only_fork')} description={i18nT('pages.settings.chatPanel.fork_keeps_only_the_messages_after_the_chosen_po')} checked={dashCfg.tail_fork_enabled} onChange={v => setDash({ tail_fork_enabled: v })} disabled={dashDisabled} />
           <SettingsToggle label={i18nT('pages.settings.chatPanel.restore_sessions')} description={i18nT('pages.settings.chatPanel.re_open_recently_active_sessions_on_startup')} checked={dashCfg.restore_sessions} onChange={v => setDash({ restore_sessions: v })} disabled={dashDisabled} />
           {dashCfg.restore_sessions && (

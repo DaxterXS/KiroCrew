@@ -25,6 +25,7 @@ from kiro_crew import model_registry
 # config.json. Only what it reads changed: the registry, instead of a frozen
 # literal.
 from kiro_crew.acp_backends import resolve_selected_backend
+from kiro_crew.appearance_packs import safe_pack_id as _safe_pack_id
 from kiro_crew.computer_use.types import DEFAULT_ATTACH_SCREENSHOT as _CU_DEFAULT_ATTACH_SCREENSHOT
 from kiro_crew.computer_use.types import DEFAULT_MAX_TREE_DEPTH as _CU_DEFAULT_MAX_TREE_DEPTH
 from kiro_crew.computer_use.types import DEFAULT_MAX_TREE_NODES as _CU_DEFAULT_MAX_TREE_NODES
@@ -576,12 +577,21 @@ def _safe_avatar(value: object) -> dict:
       under the crew's stem. Every install lands at a digest-named path, so a
       replacement never overwrites the committed file before the config save
       commits it, and serving resolves only the pinned file.
+    - ``{"kind": "pack", "id": "<pack id>"}`` — the crew wears an appearance
+      pack from the crew library (``GET /api/appearances``). ``id`` is
+      validated by :func:`kiro_crew.appearance_packs.safe_pack_id`, the same
+      rule the pack store applies to a directory name, so a value stored here
+      can always be looked up. A junk id collapses the WHOLE override to
+      ``{}``: an unrenderable pack reference is worse than the default face.
+      Whether the pack still EXISTS is deliberately not checked — config load
+      must not touch the disk — so a dangling id renders as the name-derived
+      ghost on the client.
 
     Empty means "no override" — the frontend keeps rendering the name-seeded
     face. config.json is hand-editable (and agent-writable), so junk collapses
     to ``{}`` rather than crashing the load.
 
-    Both kinds may also carry two optional per-state keys, validated and then
+    All three kinds may also carry two optional per-state keys, validated and
     round-tripped through the endpoints and config persistence (a string axis is
     normalized by the same 32-char truncation a trait gets, so a longer value
     comes back shortened rather than verbatim):
@@ -625,6 +635,22 @@ def _safe_avatar(value: object) -> dict:
         if sounds:
             out["sounds"] = sounds
         return out
+    if value.get("kind") == "pack":
+        ident = _safe_pack_id(value.get("id"))
+        if ident is None:
+            # No canonical "pack with no id" spelling exists: a pack avatar IS
+            # its id, so a missing or malformed one leaves nothing to render.
+            return {}
+        pack: dict[str, object] = {"kind": "pack", "id": ident}
+        if expressions:
+            # Accepted for symmetry with the other two kinds and round-tripped
+            # faithfully, but a pack renderer IGNORES it: the art is the pack's
+            # own files, not a trait-composed ghost, so there is no eyes/mouth
+            # axis to move. `sounds` behaves exactly as it does elsewhere.
+            pack["expressions"] = expressions
+        if sounds:
+            pack["sounds"] = sounds
+        return pack
     if value.get("kind") != "ghost":
         return {}
     raw = value.get("traits")
@@ -900,16 +926,28 @@ class AgentConfig:
         metadata=_meta(
             "Allow Unsandboxed Execution",
             "When true, allow agent subprocesses to execute without any sandbox "
-            "backend (fail-open). When false (default), wrap_argv raises a "
-            "RuntimeError if no sandbox backend is available and mode is not 'off', "
-            "preventing unsandboxed execution entirely (fail-closed). This is "
-            "distinct from sandbox_allow_no_isolation which only controls warning "
-            "severity — this field controls whether execution proceeds at all. "
-            "The default is platform-independent: on a host with no backend (any "
-            "Windows host, a Linux kernel refusing user namespaces) `kirocrew "
-            "setup` OFFERS this opt-in interactively and writes it only on an "
-            "explicit yes, so unconfined execution stays operator-declared and is "
-            "never enabled implicitly by the platform.",
+            "backend (fail-open). When false, wrap_argv raises if no sandbox "
+            "backend is available and mode is not 'off', preventing unsandboxed "
+            "execution entirely (fail-closed). This is distinct from "
+            "sandbox_allow_no_isolation which only controls warning severity — "
+            "this field controls whether execution proceeds at all. "
+            "A LOADED config carries the effective policy: the loader resolves an "
+            "undeclared key through config.loader.unsandboxed_exec_platform_default() "
+            "— allow on Windows, which has no backend that any operator action could "
+            "install, and fail-closed everywhere else, where a missing backend is "
+            "broken or one profile away from working. A declared value always wins in "
+            "both directions, and a governance sandbox.min_level floor outranks the "
+            "declaration. The resolution is folded into the VALUE rather than keyed on "
+            "key presence so a full-document save() — which serializes every field — "
+            "cannot turn 'never decided' into a declared lockdown. This dataclass "
+            "default stays platform-independent so the committed config-schema "
+            "snapshot is identical on every platform; the one caller that writes a "
+            "document from a directly constructed config (the first-run default write "
+            "in cli_server) resolves the platform default explicitly before saving. "
+            "`kirocrew setup` surfaces the decision on a backend-less host, offering "
+            "the opt-in where the default is fail-closed and stating the exposure plus "
+            "offering the opt-out where it is allow, and writes nothing unless the "
+            "operator answers yes.",
         ),
     )
     apps_allow_third_party: bool = field(
@@ -1884,6 +1922,29 @@ class KnowledgeConfig:
             "0 removes the bound.",
         ),
     )
+    import_chunk_budget: int = field(
+        default=0,
+        metadata=_meta(
+            "Explicit Import Chunk Budget",
+            "Maximum chunks ingested through the EXPLICIT one-shot import paths "
+            "(a single-file add, an agent-driven add, a direct text ingest, and "
+            "remote sync) within a rolling ~60s window -- the cross-file cost "
+            "ceiling those paths lack, since they are many independent calls "
+            "with no scan boundary the way a watcher sweep has. Each chunk costs "
+            "an LLM extraction call. When the window is exhausted the next import "
+            "is REFUSED with a reason rather than silently truncated, so a "
+            "deliberate import never loses part of a file. A single file stays "
+            "bounded by the 50-chunk per-file cap independently. 0 (the default) "
+            "removes the bound -- opt in by setting it (e.g. 500, matching "
+            "sweep_chunk_budget) so this changes nothing until you choose it. "
+            "LIMITATION if you enable it: reservation is worst-case -- each "
+            "in-flight import books the 50-chunk per-file maximum up front and "
+            "reconciles to the real count only when it finishes, so several "
+            "concurrent imports throttle below the nominal number you set here "
+            "until that accounting is refined. Set it with that headroom in "
+            "mind.",
+        ),
+    )
     embed_rate_limit: int = field(
         default=120,
         metadata=_meta(
@@ -2573,6 +2634,17 @@ class DashboardConfig:
             "not pushed straight back into the same collapse.",
         ),
     )
+    default_memory_mode: str = field(
+        default="persistent",
+        metadata=_meta(
+            "Default Memory Mode",
+            "Memory mode for new dashboard chat sessions. 'persistent' reads "
+            "and writes memory; 'incognito' reads but does not write; "
+            "'temporary' neither reads nor writes. Explicit per-session choices "
+            "still win.",
+            enum=["persistent", "incognito", "temporary"],
+        ),
+    )
     widget_density: str = field(
         default="more",
         metadata=_meta(
@@ -2751,6 +2823,31 @@ class DashboardConfig:
                             "Shell the built-in terminal launches — an absolute path or a "
                             "command on PATH. Empty = the system default ($SHELL)."
                         ),
+                    },
+                },
+                # Only `enabled` is declared; `completion.commands` (the
+                # subcommand-probe allowlist) stays an undeclared key, so the
+                # object is left open the same way `terminal` itself is.
+                "completion": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "x-meta": {
+                        "label": "Command completion",
+                        "help": "The Terminal tab's inline completion popup.",
+                    },
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "default": True,
+                            "x-meta": {
+                                "label": "Command completion",
+                                "help": (
+                                    "Show the completion popup while typing in the "
+                                    "Terminal tab. Off = no popup; the shell's own Tab "
+                                    "completion still works."
+                                ),
+                            },
+                        },
                     },
                 },
             },
@@ -3734,6 +3831,10 @@ FOLDER_INGEST_CHUNK_BUDGET_MAX = 10000
 DEDUP_EVERY_N_SWEEPS_MAX = 288
 SWEEP_CHUNK_BUDGET_MAX = 50000
 EMBED_RATE_LIMIT_MAX = 10000
+# Ceiling on the explicit-import cross-file chunk budget, same rationale as the
+# folder/sweep budgets above: clamp a negative to 0 (0 == unbounded) and cap an
+# absurd hand-edited value so it cannot load verbatim into real work.
+IMPORT_CHUNK_BUDGET_MAX = 50000
 
 
 ACTIVATION_ALWAYS = "always"  # Process every message

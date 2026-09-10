@@ -75,7 +75,16 @@ import ast
 import functools
 from pathlib import Path
 
+import pytest
+from source_corpus import candidate_sources, parsed_candidates
+
 _SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "kiro_crew"
+
+# One xdist worker for the whole module: every test here derives from ONE module-cached
+# scan of src/ (rglob + ast.parse, ~30s). Under `--dist loadgroup` an unmarked module is
+# spread across workers and each worker re-pays that scan -- measured at 5 workers x 40-75s
+# per full run for this file alone. Grouping keeps the cache single-copy per run.
+pytestmark = pytest.mark.xdist_group(name="tree_scan_test_spawn_audit")
 
 
 def _is_bundled_skill_asset(path: Path) -> bool:
@@ -392,6 +401,12 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         "apps/builtins/auto_improvement/backend/pr_watchers.py::_git",
         "apps/builtins/auto_improvement/profiles/github_repo/pr_recipe.py::_gh_prefers_ssh",
         "apps/builtins/auto_improvement/profiles/github_repo/pr_recipe.py::_git",
+        # Fixed `git -C <package root> rev-parse HEAD` / `git diff --quiet HEAD -- <root>`
+        # argv (shell=False). The only path is the kiro_crew package directory this
+        # process imported, derived from `__file__`; no agent-influenced input reaches
+        # it, and it runs once per process (lru_cache) to name the code revision the
+        # MCP gateway daemon and its owner compare.
+        "code_fingerprint.py::_git_fingerprint",
         # Fixed `git rev-parse --verify` argv (shell=False) against the OPERATOR-chosen
         # clone, asking whether the operator's `scopeDiffBase` resolves. The ref comes from
         # config (`_CONFIG_WRITABLE`), not from the agent, and it is passed as one argv
@@ -473,6 +488,13 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # that cannot apply is refused BEFORE the pipeline drafts.
         "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
         "::test_a_diff_that_does_not_apply_never_reaches_the_pipeline",
+        # Same basis: literal `git config/add/commit/cat-file/diff` against a tmp_path clone,
+        # proving a credential planted in the COMMITTER IDENTITY is refused. Real git is
+        # required rather than a stub: the point is which bytes git itself puts in the commit
+        # object, which canned output cannot demonstrate. Nothing is agent-influenced -- the
+        # argv is literal and the cwd is the test's own tmp_path.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_a_credential_in_the_committer_identity_refuses_to_publish",
         # NOT a subprocess spawn: the AST heuristic matches ``asyncio.run`` (attr ``run`` on
         # base ``asyncio``), used to drive the async ``_approve`` coroutine so a REAL SEL
         # write can be read back off disk. No child process is created.
@@ -532,6 +554,39 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # Its inner `_repo` helper: fixed `git init/clone/commit/push` argv against a tmp_path
         # bare repo, building the local-vs-remote base case for the credential-scan self-diff.
         "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py::_repo",
+        # The direct-push HEAD-identity tests. `::run` is a stub pre-push reviewer that
+        # amends the test's OWN tmp_path clone to reproduce the race; the test function spawns
+        # `git rev-parse --short HEAD` inline to assert that amend really landed before it
+        # asserts the refusal. Both are fixed `git` argv against a per-test tmp_path repo with
+        # no remote -- nothing in the argv, the cwd or the resolved binary is agent-influenced,
+        # and the enclosing `::git` helper above already covers the repo builder.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py::run",
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_a_reviewer_amend_between_commit_and_push_refuses_to_publish",
+        # Same basis: the shadow-ref variant additionally spawns `git branch <short-sha> HEAD`
+        # and two `git rev-list -1` reads, all literal argv with cwd and `-C` pinned to the
+        # same per-test tmp_path clone, asserting the injection applied before the refusal.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_a_ref_named_the_abbreviation_cannot_shadow_the_committed_object",
+        # The time-of-check/time-of-use pair, same basis again: `::_scan_then_amend` stands in
+        # for a background amend landing while the credential scan runs, and the two test
+        # functions read HEAD back with `git rev-list -1` to prove the injection applied and
+        # to pin the published revision to a full object id.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py::_scan_then_amend",
+        # `::_gate_then_swap_head` is the same injection one step earlier -- it moves HEAD
+        # right after the pre-scan gate returns, to prove the scan is bound to the object id
+        # rather than to `HEAD`.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py" "::_gate_then_swap_head",
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_the_credential_scan_reads_the_committed_object_not_head",
+        # Same basis: this one additionally spawns `git replace` and a `git show` control, to
+        # prove a replacement ref cannot substitute what the credential scan reads.
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_a_replacement_ref_cannot_substitute_what_the_scan_reads",
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_a_move_after_the_scan_cannot_change_what_is_published",
+        "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
+        "::test_an_unmoved_head_still_publishes",
         # Same basis: literal `git rev-parse`/`diff`/`reset` against a tmp_path repo, showing a
         # left-behind provisional commit lands in the NEXT bug PR's range.
         "apps/builtins/auto_improvement/tests/test_dogfood_learnings.py"
@@ -924,6 +979,19 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # from kiro-cli's own store (see ``acp/kas_transport.py``), so the former
         # ``chat _ get-kas-token`` spawn is gone rather than moved.
         "cli_doctor.py::_kas_relay_help",
+        # ``<kiro-cli> whoami`` sign-in probe for the declaration-driven auth row:
+        # fixed argv (the binary name is a module constant and the subcommand is a
+        # literal), 10s-capped, no shell, no agent-influenced argument. It reads only
+        # the EXIT CODE -- stdout is captured so it cannot reach a terminal and is
+        # never parsed, so no identity or token value enters the process.
+        #
+        # This is the one harness whose credential state the doctor probes at all, and
+        # deliberately so: kiro-cli signs in to the HOST identity store, so its state
+        # is the host's own. Every other harness keeps its entitlement in a file it
+        # owns, and reading that file is what the credential floor exists to forbid --
+        # a probe there would be the one reader the floor cannot fence. Those rows
+        # print their declared remedy unprobed instead (``_doctor_agent_auth``).
+        "cli_doctor.py::_kiro_cli_signed_in",
         # ``systemctl is-active <unit>`` probes for the memory-pressure
         # preparedness check: argv is hardcoded (systemd-oomd/earlyoom unit
         # names), no agent influence, 5s-capped, read-only query.
@@ -1453,13 +1521,19 @@ def _collect_first_party_flag_sites() -> frozenset[str]:
     ``sandbox.py`` is excluded by design: it OWNS the parameter (``wrap_argv``
     defines it; ``sandboxed_spawn_argv`` threads it through), so its internal
     forwarding is the mechanism under audit, not a spawn site.
+
+    Parses only files whose text already contains ``first_party_fixed_argv``
+    (``test/source_corpus.py``'s shared, narrowed read) instead of re-``rglob``
+    + re-``read_text``-ing the whole tree: the literal must appear verbatim for
+    a keyword of that name to exist, so no candidate is dropped. Cached like
+    the sibling scans, and released with the rest of the corpus by
+    ``test/conftest.py::_release_source_corpus_after_module`` at module end.
     """
     out: set[str] = set()
-    for path in _SRC_ROOT.rglob("*.py"):
+    for path, source in candidate_sources(require_all=(_FIRST_PARTY_KWARG,)):
         rel = path.relative_to(_SRC_ROOT).as_posix()
         if rel == "sandbox.py" or _is_bundled_skill_asset(path):
             continue
-        source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, str(path))
         funcs = [
             n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -1517,18 +1591,24 @@ def _collect_spawn_functions() -> dict[str, str]:
     function containing a subprocess spawn. ``<module>`` marks a module-level
     spawn (no enclosing function).
 
-    Cached: all six audit tests derive from this one rglob+ast.parse scan of
-    the whole source tree (~2s), so re-scanning per test multiplies pure
-    duplicated wall-clock. The source tree cannot change mid-run and callers
-    only read the mapping, so a shared instance is safe.
+    Cached: all six audit tests derive from this one scan, so re-scanning per
+    test multiplies pure duplicated wall-clock. The source tree cannot change
+    mid-run and callers only read the mapping, so a shared instance is safe.
+    Parses only files whose text already contains one of the spawn attribute
+    or bare-name tokens (``test/source_corpus.py``'s shared, narrowed read)
+    instead of a private ``rglob`` + ``read_text`` of the whole tree: the
+    matched ``ast.Call`` always spells one of these tokens verbatim in the
+    source, so narrowing cannot drop a real spawn site. Released with the rest
+    of the corpus by ``test/conftest.py::_release_source_corpus_after_module``
+    at module end.
     """
     out: dict[str, str] = {}
-    for path in _SRC_ROOT.rglob("*.py"):
+    needles = tuple(_SPAWN_ATTRS | _SPAWN_NAMES)
+    for path, source in candidate_sources(require_any=needles):
         # A skill's own helper scripts are not gateway runtime code paths --
         # see ``_is_bundled_skill_asset`` for why they are out of scope.
         if _is_bundled_skill_asset(path):
             continue
-        source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, str(path))
         funcs = [
             n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -1784,10 +1864,9 @@ def test_bundled_skill_assets_are_not_imported():
     }
 
     offenders: list[str] = []
-    for path in _SRC_ROOT.rglob("*.py"):
+    for path, _source, tree in parsed_candidates():
         if _is_bundled_skill_asset(path):
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
         rel = path.relative_to(_SRC_ROOT).as_posix()
         for node in ast.walk(tree):
             names: list[str] = []

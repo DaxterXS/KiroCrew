@@ -310,8 +310,12 @@ def build_tool_gate(ctx_builder: Any, *, session_key: str, agent: str) -> Callab
             agent=agent,
             tool_kind=getattr(event, "tool_kind", "") or "",
             raw_params=getattr(event, "raw_tool_params", None),
+            diff_path=getattr(event, "diff_path", "") or "",
             command=getattr(event, "shell_command", None),
             is_shell=bool(getattr(event, "is_shell", False)),
+            mcp_server_name=getattr(event, "mcp_server_name", "") or "",
+            mcp_tool_name=getattr(event, "tool_name", "") or "",
+            mcp_identity_trusted=bool(getattr(event, "mcp_identity_trusted", False)),
         )
         if result.action == TOOL_DENY:
             return "deny"
@@ -753,7 +757,7 @@ async def drive_turn(turn: ChannelTurn, *, sessions: Any, ctx_builder: Any) -> N
             session_key,
         )
         # Durability, at the ONE point where the payload is still in memory and
-        # the turn is provably unopened (issue #2217). Every other outcome of this
+        # the turn is provably unopened. Every other outcome of this
         # dispatch — a completed turn, a turn that ran and failed — is already
         # recorded somewhere, which is why nothing is spooled on those paths and
         # why a replay cannot double-answer. Best-effort by construction: the

@@ -89,6 +89,16 @@ from kiro_crew.dashboard.handlers.agents import (  # noqa: E402, F401
     api_slash_commands,
 )
 
+# ── Crew appearance library (handlers/appearances.py) ──
+from kiro_crew.dashboard.handlers.appearances import (  # noqa: E402, F401
+    api_appearance_delete,
+    api_appearance_detail,
+    api_appearance_slot,
+    api_appearances_import,
+    api_appearances_list,
+    api_appearances_petdex_fetch,
+)
+
 # ── Connections OAuth relay (handlers/connections.py) ──
 from kiro_crew.dashboard.handlers.connections import (  # noqa: E402, F401
     api_connections_cancel,
@@ -314,6 +324,7 @@ from kiro_crew.dashboard.handlers.messaging import (  # noqa: E402, F401
     api_teams_config_save,
     api_telegram_config_get,
     api_telegram_config_save,
+    api_update_message,
     api_webex_config_get,
     api_webex_config_save,
     api_wecom_config_get,
@@ -629,9 +640,9 @@ def _prompt_dir_entry(path: Path, root_real: Path, src: str) -> dict[str, Any] |
       the scoped read already refuses a hardlinked prompt outright, so a listing
       that offered one would advertise a file its own scope will not serve.
     * An unreadable file is NOT refused. It keeps its entry with an empty
-      description, exactly as before — a bad mode or a transient I/O error must
-      surface as the read path's own error, not as a prompt silently vanishing
-      from the user's library.
+      description: a bad mode or a transient I/O error must surface as the read
+      path's own error, not as a prompt silently vanishing from the user's
+      library.
     * The stem must satisfy ``_plain_stem_ok``, the single predicate create, the
       scoped read and both write verbs already address a prompt by. A stem it
       rejects is one every other verb on this API answers ``invalid_name`` for, so

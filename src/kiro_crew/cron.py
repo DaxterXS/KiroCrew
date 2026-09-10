@@ -32,7 +32,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator, NamedTuple
 from zoneinfo import ZoneInfo
@@ -84,6 +84,8 @@ _CRON_STRING_FIELD_CAPS: tuple[tuple[str, int], ...] = (
     ("thread_ts", 30),
     ("agent_id", MAX_SHORT_STRING),
     ("created_by", MAX_SHORT_STRING),
+    ("source_preset", MAX_SHORT_STRING),
+    ("source_template_prompt", MAX_CRON_MESSAGE),
     ("folder_id", MAX_SHORT_STRING),
     ("session_key", MAX_SHORT_STRING),
     ("model", MAX_SHORT_STRING),
@@ -625,6 +627,32 @@ class CronJob:
     approval_mode: str = ""  # "" (default/hook-based) | "auto" (auto-approve all tools)
     acked_items: list[str] = field(default_factory=list)
     created_by: str = ""  # Slack user ID of the creator (for DM fallback)
+    # Provenance of a job seeded from a Schedule-page template. Curated
+    # template prompts are COPIED into the job at save time (the user owns and
+    # edits their prompt), so a later fix to a template is unreachable for jobs
+    # already saved. Two create-only fields, written together by the dashboard
+    # create path ONLY (MCP / CLI / apps SDK / onboarding import never involve a
+    # template and leave both ""):
+    #
+    #   source_preset          -- the template preset id (e.g. "error-digest").
+    #   source_template_prompt -- the template's prompt text AS IT WAS at save
+    #                             time (a snapshot, written once, never updated).
+    #
+    # The snapshot is what makes "the template changed" an ATTRIBUTABLE claim.
+    # Comparing the job's live message against the template's CURRENT prompt is
+    # symmetric: it cannot tell a template that moved from a user who edited
+    # their own copy. The snapshot fixes one operand at save time, so the
+    # Schedule page can ask the two questions separately -- did the TEMPLATE
+    # move (snapshot != live preset prompt), which is the only thing that shows
+    # a "template updated" hint, versus did the USER edit their copy
+    # (message != snapshot), which shows nothing. It is a text snapshot, not a
+    # maintained revision integer, so it cannot drift out of date.
+    #
+    # "" for both means "unknown" -- a blank/non-dashboard create, or a job
+    # saved before these fields existed (_job_from_record defaults both to "").
+    # Such a job simply never shows the hint.
+    source_preset: str = ""
+    source_template_prompt: str = ""
     silent: bool = False  # suppress auto-delivery; agent sends via send_message
     session_key: str = ""  # session that created this job (for scoped removal)
     last_posted_hash: str = ""  # hash of last result posted to Slack (dedup)
@@ -1142,6 +1170,78 @@ def get_local_tz() -> tuple[str, ZoneInfo]:
         return "UTC", ZoneInfo("UTC")
 
 
+# Patterns for parse_time_string
+_RE_IN_DURATION = re.compile(
+    r"^in\s+(\d+)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours)$", re.I
+)
+_UNIT_SECS = {
+    "s": 1,
+    "sec": 1,
+    "second": 1,
+    "seconds": 1,
+    "m": 60,
+    "min": 60,
+    "minute": 60,
+    "minutes": 60,
+    "h": 3600,
+    "hr": 3600,
+    "hour": 3600,
+    "hours": 3600,
+}
+
+
+def parse_time_string(s: str) -> float | str:
+    """Parse a human time string into a Unix timestamp. Returns error string on failure.
+
+    Lives here, next to :func:`get_local_tz`, because BOTH one-shot entry points
+    need it: the ``cron_add`` MCP tool and ``POST /api/crons``. A second copy
+    would let the two drift, and "5pm" resolving to different instants depending
+    on which door the request came through is exactly the class of bug a shared
+    parser prevents. Relative forms ("in 30 minutes") are absolute already;
+    everything else is interpreted in the CONFIGURED timezone, never the
+    process's, so a gateway running in UTC still honours the user's setting.
+    """
+    s = s.strip()
+    _, tz = get_local_tz()
+    now = datetime.now(tz)
+
+    # "in 5 minutes", "in 2 hours"
+    m = _RE_IN_DURATION.match(s)
+    if m:
+        secs = int(m.group(1)) * _UNIT_SECS[m.group(2).lower()]
+        return time.time() + secs
+
+    # Try common formats with optional "tomorrow"
+    tomorrow = False
+    text = s
+    if text.lower().startswith("tomorrow"):
+        tomorrow = True
+        text = re.sub(r"^at\b\s*", "", text[8:].strip())
+
+    # "5pm", "5:30pm", "17:00", "9:30am"
+    for fmt in ("%I%p", "%I:%M%p", "%H:%M", "%I %p", "%I:%M %p"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            result = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+            if tomorrow:
+                result += timedelta(days=1)
+            elif result <= now:
+                result += timedelta(days=1)  # "5pm" when it's already 6pm → tomorrow
+            return result.timestamp()
+        except ValueError:
+            continue
+
+    # ISO-ish: "YYYY-MM-DD HH:MM", space or "T" separator, seconds optional
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(text, fmt).replace(tzinfo=now.tzinfo)
+            return parsed.timestamp()
+        except ValueError:
+            continue
+
+    return f"Error: could not parse time '{s}'. Examples: '5pm', 'in 30 minutes', 'tomorrow 9am'"
+
+
 def _job_tz(job: CronJob) -> ZoneInfo:
     """Return the job's timezone, falling back to the published default then UTC.
 
@@ -1357,6 +1457,18 @@ def enabled_count_from_disk(path: Path) -> tuple[int, bool]:
     return (count, loadable)
 
 
+def _str_or_empty(value: Any) -> str:
+    """Return *value* when it is a string, else ``""``.
+
+    ``crons.json`` is hand-editable, so a record may carry a non-string where a
+    string is expected. A stored value that is not a string degrades to ``""``
+    (the field's "unset" value) rather than flowing into a consumer that calls
+    string methods on it -- the redacting serializer on ``GET /api/crons`` would
+    otherwise raise on ``.strip()``/regex and 500 the whole listing.
+    """
+    return value if isinstance(value, str) else ""
+
+
 def _job_from_record(j: dict[str, Any]) -> CronJob:
     """Build one :class:`CronJob` from its serialized record.
 
@@ -1414,6 +1526,8 @@ def _job_from_record(j: dict[str, Any]) -> CronJob:
         approval_mode=j.get("approval_mode", ""),
         acked_items=j.get("acked_items", []),
         created_by=j.get("created_by", ""),
+        source_preset=_str_or_empty(j.get("source_preset")),
+        source_template_prompt=_str_or_empty(j.get("source_template_prompt")),
         silent=j.get("silent", False),
         session_key=j.get("session_key", ""),
         last_posted_hash=j.get("last_posted_hash", ""),
@@ -1504,6 +1618,15 @@ class CronService:
         self._executing: set[str] = set()  # job IDs currently running
         self._running_tasks: dict[str, asyncio.Task[None]] = {}  # strong refs to prevent GC
         self._job_start_times: dict[str, float] = {}  # job ID → epoch start
+        # job ID → time.monotonic() at start, kept in lockstep with
+        # _job_start_times and read ONLY by the reaper's deadline comparison.
+        # The primary guard (asyncio.wait_for in _execute_with_timeout) counts
+        # down on the loop's monotonic clock, so the backstop has to measure on
+        # the same clock or the two disagree whenever the wall clock jumps (host
+        # suspend, NTP step) and the backstop force-kills a run wait_for still
+        # considers healthy. The epoch map stays for human-facing timestamps
+        # (running_since, history, the "ran Ns" log).
+        self._job_start_monotonic: dict[str, float] = {}  # job ID → monotonic start
         self._reaped_jobs: set[str] = set()  # job IDs killed by the reaper
         self._cancelled_jobs: set[str] = set()  # job IDs cancelled by the user
         self._job_jitter: dict[str, float] = {}  # job ID → jitter seconds applied
@@ -1677,6 +1800,7 @@ class CronService:
         while True:
             await asyncio.sleep(_REAPER_INTERVAL)
             now = time.time()
+            now_mono = time.monotonic()
             # Snapshot the job list CACHE-ONLY — no store lock, no _sync, no
             # disk I/O on the loop (same rationale as list_jobs/get_job). The
             # batch-remove worker (remove_jobs → asyncio.to_thread) builds a
@@ -1689,6 +1813,18 @@ class CronService:
             jobs_by_id = {j.id: j for j in self._jobs}
             for job_id, started in list(self._job_start_times.items()):
                 elapsed = now - started
+                # DECIDE and REPORT on the monotonic clock. An entry with no
+                # monotonic stamp (a run already in flight across an upgrade, or
+                # a test that seeds only the epoch map) falls back to the
+                # wall-clock elapsed, so the backstop never stops reaping — it
+                # just cannot tell suspend time apart for that run.
+                #
+                # The reported duration is monotonic too, not wall-clock: a
+                # backward wall-clock step during a >=30-min run would otherwise
+                # render a negative "ran -Ns"/"Reaped after -Ns" in the log and
+                # the persisted history. Monotonic elapsed is equally legible
+                # ("seconds since start") and cannot go negative.
+                elapsed_mono = now_mono - self._job_start_monotonic.get(job_id, now_mono - elapsed)
                 job = jobs_by_id.get(job_id)
                 deadline = (
                     max(min(job.timeout_secs, 86400), _JOB_TIMEOUT_SECS)
@@ -1696,21 +1832,22 @@ class CronService:
                     else _JOB_TIMEOUT_SECS
                 ) + (_pool_queue_allowance(job) + _gate_budget_allowance(job) + _vet_allowance(job))
                 jitter_allowance = self._job_jitter.get(job_id, 0.0)
-                if elapsed <= deadline + jitter_allowance:
+                if elapsed_mono <= deadline + jitter_allowance:
                     continue
                 task = self._running_tasks.get(job_id)
                 if task and task.done():
                     # Normal timeout path already completed; just clean up tracking.
                     self._job_start_times.pop(job_id, None)
+                    self._job_start_monotonic.pop(job_id, None)
                     continue
                 logger.warning(
                     "Reaper: cron job %s exceeded %ds (ran %.0fs), force-killing",
                     job_id,
                     deadline,
-                    elapsed,
+                    elapsed_mono,
                 )
                 try:
-                    await self._force_reap(job_id, elapsed, deadline)
+                    await self._force_reap(job_id, elapsed_mono, deadline)
                 except Exception:
                     logger.exception("Reaper: failed to reap cron job %s", job_id)
 
@@ -1726,6 +1863,7 @@ class CronService:
         reap_started_at = meta[0] if meta else time.time() - elapsed
         reap_trigger = meta[1] if meta else "scheduled"
         self._job_start_times.pop(job_id, None)  # prevent repeated reaping
+        self._job_start_monotonic.pop(job_id, None)
         # Kill the session process first.
         if self._sessions:
             try:
@@ -1921,6 +2059,7 @@ class CronService:
         trigger = meta[1] if meta else "scheduled"
         elapsed = time.time() - started_at
         self._job_start_times.pop(job_id, None)
+        self._job_start_monotonic.pop(job_id, None)
         self._job_jitter.pop(job_id, None)
 
         job = next((j for j in self._jobs if j.id == job_id), None)
@@ -2357,6 +2496,8 @@ class CronService:
         minimal_context: bool = False,
         timeout: int = 0,
         timeout_secs: int = 0,
+        source_preset: str = "",
+        source_template_prompt: str = "",
     ) -> CronJob:
         """Event-loop-safe :meth:`add_job`: the lock+save runs off the loop.
 
@@ -2405,6 +2546,16 @@ class CronService:
             timeout=timeout,
             timeout_secs=timeout_secs,
         )
+        # Dashboard-only template provenance. Set on the freshly-built job
+        # BEFORE the off-loop persist -- the object has no other reference yet,
+        # so this is still a single fully-formed first save, not a
+        # build-then-mutate-then-second-save. Kept off _build_job because only
+        # this async path is ever called with them (the sync add_job, CLI, MCP
+        # and apps SDK never carry a template), so threading them through the
+        # shared constructor would be surface with no consumer.
+        if source_preset:
+            job.source_preset = source_preset
+            job.source_template_prompt = source_template_prompt
         await asyncio.to_thread(self._persist_add_locked, job)
         self._arm_timer()
         logger.info("Added cron job '%s' (%s)", name, job.id)
@@ -2614,6 +2765,20 @@ class CronService:
                     job.agent_id = kwargs["agent_id"] or ""
                 if "channel" in kwargs:
                     job.channel = kwargs["channel"] or None
+                if "thread_ts" in kwargs:
+                    # Paired with ``channel``: together they decide WHERE a run's
+                    # output lands, and ``add_job`` has always accepted both. With
+                    # no branch here the field was validated (see the caps table)
+                    # and then dropped, so the caller was told "Updated" while the
+                    # cron kept replying in the old thread. Falsy clears, mirroring
+                    # ``channel`` and how mcp_cron normalizes blank to None.
+                    #
+                    # A granted script job re-threaded this way fails its NEXT run
+                    # closed: thread_ts is bound into the grant's delivery
+                    # fingerprint (cron_script.delivery_fingerprint), so the pin
+                    # stops verifying until the operator re-approves. That is the
+                    # intended fail-closed path, not a regression.
+                    job.thread_ts = kwargs["thread_ts"] or None
                 if "approval_mode" in kwargs:
                     job.approval_mode = kwargs["approval_mode"] or ""
                 if "silent" in kwargs:
@@ -3741,6 +3906,10 @@ class CronService:
         started_at = meta[0] if meta else time.time()
         trigger = meta[1] if meta else "scheduled"
         self._job_start_times[job.id] = started_at
+        # Stamped here rather than derived from started_at: the two clocks share
+        # no epoch, so the reaper's deadline is only meaningful against a stamp
+        # taken on its own clock.
+        self._job_start_monotonic[job.id] = time.monotonic()
         # One increment per execution, before the jitter sleep so a run cancelled
         # during jitter still counts as fired. ``kind`` is the dispatch shape --
         # ``script`` and ``command`` bypass the model entirely, so this is the
@@ -3832,6 +4001,7 @@ class CronService:
             except Exception:
                 logger.debug("in-flight marker not cleared for %s", job.id, exc_info=True)
             self._job_start_times.pop(job.id, None)
+            self._job_start_monotonic.pop(job.id, None)
             self._job_jitter.pop(job.id, None)
             self._job_run_meta.pop(job.id, None)
             reaped = job.id in self._reaped_jobs
@@ -4924,6 +5094,8 @@ class CronService:
                     "approval_mode": j.approval_mode,
                     "acked_items": j.acked_items,
                     "created_by": j.created_by,
+                    "source_preset": j.source_preset,
+                    "source_template_prompt": j.source_template_prompt,
                     "silent": j.silent,
                     "session_key": j.session_key,
                     "last_posted_hash": j.last_posted_hash,

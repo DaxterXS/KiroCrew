@@ -281,7 +281,7 @@ Every job here is blocking. Every job that costs real runner time also `needs:`
 | `cfn-lint` | Lints the artifact-deploy templates with a pinned `cfn-lint` |
 | `linux-packaging` | "Linux Packaging (build + smoke-install)". Builds all three Linux desktop formats from one backend tree through `packaging/build-desktop.sh`, then installs them in their target distros with `scripts/smoke-linux-packages.sh`. Path-filtered on the packaging surface |
 | `lockfile-engines-floor` | "Lockfile Installs On Declared Node Floor". Runs a real `npm ci` in `website/` on the LOWEST Node version `engines.node` declares, so a lockfile that only resolves under the newer npm major cannot land. The version is a literal pinned to that floor by `test_the_engines_floor_job_pins_the_declared_floor` rather than a range, because resolving a range picks the newest match and makes the job vacuous |
-| `bundle-size` | "Bundle Size Gate". Builds the frontend with `--mode analyze` (which is the only build that emits `dist/bundle-report.json`) and enforces per-chunk ceilings from `website/scripts/check-bundle-size.mjs`, with a 500 KB default for any chunk not named there. Skipped on a backend-only diff, which cannot change the bundle |
+| `bundle-size` | "Bundle Size Gate". Builds the frontend with `--mode analyze` (which is the only build that emits `dist/bundle-report.json`) and then runs TWO checks over that one build: per-chunk ceilings from `website/scripts/check-bundle-size.mjs`, with a 500 KB default for any chunk not named there, and an acyclic-graph check from `website/scripts/check-chunk-cycles.mjs`. The job name is narrower than its scope on purpose — it is a required check, so renaming it would silently stop satisfying branch protection. **An acyclic chunk graph is a deliberate invariant and the cycle check has no allowlist**, unlike the size ceilings: a chunk cycle has no valid initialization order, so a body can run against a binding that is still uninitialized and blank the page before React mounts, and whether a given cycle does that is not decidable from the chunk graph. Fix the chunking rather than waiving it. Skipped on a backend-only diff, which cannot change the bundle |
 | `e2e` | The i18n render-time gate, then `python setup.py test_e2e` |
 
 Details worth knowing:
@@ -728,8 +728,9 @@ Two lanes stay outside that function, and both exclusions are deliberate:
   posted its verdict (a reopen, or an `edited` title/body on `codex-review.yml`)
   would make the same-repo lane's own run the newest one and satisfy the
   gate on a review that never ran. `pr-readiness.yml` was never fooled by this
-  -- it collapses every check-run of the name and treats "no completed run" as
-  pending -- so the rename closes the branch-protection half of the gate.
+  -- for a fork it reads only the check-runs bound to this PR and attempt by
+  `external_id` and treats "no completed bound run" as pending -- so the rename
+  closes the branch-protection half of the gate.
 - `persist-credentials: false` on checkout, so `actions/checkout` never writes the
   token into `.git/config` where a reviewer reading untrusted PR content could find
   it.
@@ -1016,9 +1017,29 @@ managed CodeQL workflow is not scheduled for fork heads. Two consequences.
 **A fork PR can still reach `readiness: passed`.** The `fork-*` pipeline below runs
 the AI reviews from the trusted base branch and posts them as check-runs under the
 same names the same-repo lanes use, so `pr-readiness.yml` evaluates a fork from
-those check-runs and a fully green fork is fully validated. CodeQL is the single
-ineligible lane, reported as a non-blocking "Not eligible" note rather than a
-blocker. Readiness therefore says the same thing on a fork as anywhere else: the
+those check-runs and a fully green fork is fully validated. That read is **bound to
+the lane's `external_id`**, which carries the PR number plus the triggering run id
+and attempt (`<lane>-pr-<PR>-<run>-<attempt>`), not the check-run name alone: two
+open PRs can share a head SHA and each posts a check-run under this same name, and a
+rerun on an unchanged head leaves the previous attempt's row in place, so a
+name-only read could let a sibling PR's clean verdict — or a stale previous-attempt
+row — answer for this PR. Readiness derives the expected id from the newest run of
+the triggering workflow (`Fast Gate`); when no matching row exists yet the lane
+reads as pending, which holds the merge rather than borrowing an answer. A
+human-override rerun (`gh api .../runs/<id>/rerun`) re-executes a lane's run
+directly without Fast Gate re-running, so the trigger-bound id stays identical
+between the stale failed attempt and the fresh rerun -- readiness resolves that by
+collapsing every check-run sharing an id to the newest by check-run id (distinct per
+POST, monotonically increasing), so the fresh rerun always wins. `pr-readiness.yml`
+also triggers on that same rerun's own `workflow_run: in_progress` event, which
+fires the instant the rerun starts and can race the rerun's own "Open check-run"
+step -- reading check-runs at that exact moment would still see only the OLD
+completed verdict. Readiness recognizes when its own evaluation was triggered by
+that lane's `in_progress` event (by name and status on the triggering
+`workflow_run`) and reads pending directly, without querying check-runs at all;
+the rerun's own completion re-triggers a real evaluation. CodeQL is
+the single ineligible lane, reported as a non-blocking "Not eligible" note rather
+than a blocker. Readiness therefore says the same thing on a fork as anywhere else: the
 eligible automated validation passed for this revision. Human approval and branch
 protection remain separate gates.
 

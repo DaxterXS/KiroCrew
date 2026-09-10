@@ -65,6 +65,7 @@ from kiro_crew.messaging.commands import (
     compact_unsupported_reply,
     stop_running_turn,
 )
+from kiro_crew.messaging.conversation import reserve_new_generation
 from kiro_crew.messaging.dispatch import (
     build_auto_approve,
     build_directive_consumer,
@@ -369,9 +370,17 @@ class DiscordDispatcher:
                 await self.client.send_message(channel_id, _RELEASE_FAILURE)
                 return monitor_result
             self._conv.bump_gen(scope_id)
+            new_session_key = self._session_key(user_id, thread_id)
+            saved = await reserve_new_generation(
+                self.sessions,
+                new_session_key,
+                channel_type="Discord",
+            )
             message = "✅ New conversation started."
             if left_resumed is not None:
                 message = "✅ New conversation started — left the resumed session."
+            if not saved:
+                message += "\n⚠️ The new conversation could not be saved for restart."
             await self.client.send_message(channel_id, message)
             return monitor_result
         if cmd == "compact":
@@ -381,7 +390,7 @@ class DiscordDispatcher:
         if cmd == "sessions":
             # DM-ONLY. The owner gate answers WHO may resume, not WHERE the
             # result may be shown: in an allow-listed guild thread the picker
-            # would post dashboard session TITLES and the bind would replay five
+            # would post private session TITLES and the bind would replay five
             # transcript messages, making private history readable by every
             # member of that thread. Resume is inherently a private-surface
             # operation, so refuse outside a DM rather than redacting harder.
@@ -389,7 +398,7 @@ class DiscordDispatcher:
                 await self.client.send_message(
                     channel_id,
                     "🔒 `!sessions` works only in a direct message — it lists and "
-                    "replays private dashboard conversations, so it will not post "
+                    "replays private conversations, so it will not post "
                     "them into a shared thread. DM me instead.",
                 )
                 return monitor_result
@@ -398,6 +407,7 @@ class DiscordDispatcher:
                 user_id,
                 channel_id,
                 query=parse_command_argument(text),
+                native_key=self._session_key(user_id, thread_id),
             )
             return monitor_result
         if cmd == "link":
@@ -750,8 +760,12 @@ class DiscordDispatcher:
                     agent=agent,
                     tool_kind=getattr(event, "tool_kind", "") or "",
                     raw_params=getattr(event, "raw_tool_params", None),
+                    diff_path=getattr(event, "diff_path", "") or "",
                     command=getattr(event, "shell_command", None),
                     is_shell=bool(getattr(event, "is_shell", False)),
+                    mcp_server_name=getattr(event, "mcp_server_name", "") or "",
+                    mcp_tool_name=getattr(event, "tool_name", "") or "",
+                    mcp_identity_trusted=bool(getattr(event, "mcp_identity_trusted", False)),
                 )
                 if result.action == TOOL_DENY:
                     return "deny"
@@ -1273,7 +1287,12 @@ class DiscordDispatcher:
         if data.startswith("s:"):
             if itx.guild_id:
                 return
-            await self._session_resume.choose(self.client, itx, data)
+            await self._session_resume.choose(
+                self.client,
+                itx,
+                data,
+                native_key=self._session_key(itx.user_id, thread_id),
+            )
             return
 
         # Tool-approval decision: "a:<request_id>:<nonce>:<1|0>". The nonce is
@@ -1731,7 +1750,7 @@ class DiscordDispatcher:
         pct = self.sessions.check_context_usage(session_key, provider)
         soft_pct = self.cfg.discord.soft_threshold_pct
         if pct >= soft_pct and compact_unsupported_backend(provider):
-            # Capability gate (#8156): the nudge advises !compact, which this
+            # Capability gate: the nudge advises !compact, which this
             # backend refuses — it compacts on its own as context fills, so
             # there is nothing for the user to act on.
             return

@@ -130,9 +130,9 @@ _SLACK_SECRET_FIELDS = {
 #: Transports ``send_message``'s ``channel_type`` may name, which is also the set
 #: its channel ``session`` values may name. Reads the shared
 #: ``CHANNEL_SEND_NAMESPACES`` rather than subtracting the two non-targets here:
-#: that subtraction was spelled at three separate readers, which is the same drift
-#: shape that left a Webex owner DM unreachable while this module's own leg already
-#: served it (#6514). The exclusions and their reasons are documented at the
+#: a subtraction spelled at each reader drifts, and a drifted copy can leave a
+#: Webex owner DM unreachable while this module's own leg already serves it.
+#: The exclusions and their reasons are documented at the
 #: definition — ``slack`` has its own client and streaming path and is deliberately
 #: absent from ``state.channel_transports`` (``session="slack"`` is its spelling),
 #: and ``unified`` is a session-key bucket rather than a transport.
@@ -422,7 +422,7 @@ async def api_spawn_steer(request: web.Request) -> web.Response:
             return web.json_response({"error": detail, "code": "not_running"}, status=409)
         if detail.startswith("session_starting"):
             # Transient: the run is alive but its session has not registered
-            # yet (#1113). 503 + Retry-After tells clients to retry, unlike
+            # yet. 503 + Retry-After tells clients to retry, unlike
             # the terminal 502 steer_failed.
             return web.json_response(
                 {"error": detail, "code": "session_starting"},
@@ -663,10 +663,10 @@ async def api_spawn_status(request: web.Request) -> web.Response:
         data["elapsed"] = round(time.time() - info.started)
         # Same predicate, same present-only-while-true convention as
         # api_spawn_list. This endpoint is the one a blocking `kirocrew spawn
-        # run` polls every 2s (cli_commands.py), so leaving it out is what kept
-        # the CLI reproduction of #6484 silent: the caller sat on "waiting for
-        # result..." while the answer ("a prompt is waiting for you") was only
-        # discoverable from a separate `spawn list` or a log grep.
+        # run` polls every 2s (cli_commands.py), so leaving it out would keep the
+        # CLI silent: the caller would sit on "waiting for result..." while the
+        # answer ("a prompt is waiting for you") was only discoverable from a
+        # separate `spawn list` or a log grep.
         if _awaiting_spawn_approval(info):
             data["awaiting_approval"] = True
     return web.json_response(data)
@@ -688,12 +688,11 @@ def _awaiting_spawn_approval(info: object) -> bool:
     pair, because the two handlers build their payloads independently and a
     drift between them is invisible to a behavioural test.
 
-    ``subagent_manager/terminal.py`` computes the same pair for the reap message
-    (#7325). Deliberately not extracted onto ``SubagentInfo``: that read is a
-    plain attribute read on a live run inside the manager package, whereas this
-    one must survive the info doubles the handlers are tested with (below), and
-    unifying them would mean editing a reap path this change does not otherwise
-    touch. The duplication is two lines and both sites name each other.
+    ``subagent_manager/terminal.py`` computes the same pair for the reap message.
+    Deliberately not extracted onto ``SubagentInfo``: that read is a plain
+    attribute read on a live run inside the manager package, whereas this one
+    must survive the info doubles the handlers are tested with (below). The
+    duplication is two lines and both sites name each other.
 
     ``getattr`` with a strict ``is True`` / ``is None``: these handlers are
     exercised with lightweight info doubles (SimpleNamespace / MagicMock) that
@@ -733,9 +732,8 @@ async def api_spawn_list(request: web.Request) -> web.Response:
             # Present only while the run is parked on its spawn-approval
             # prompt, so the default payload is unchanged. Without it a run
             # waiting for a human is byte-identical to one that is executing --
-            # which is how #6484 presented: `kirocrew spawn list` showed the
-            # same hourglass for a run that had no child process and was only
-            # ever waiting to be approved.
+            # `kirocrew spawn list` would show the same hourglass for a run that
+            # has no child process and is only ever waiting to be approved.
             if _awaiting_spawn_approval(info):
                 entry["awaiting_approval"] = True
         # Present only when a group was actually withheld, so the default
@@ -1114,7 +1112,7 @@ async def api_notification_agent_push(request: web.Request) -> web.Response:
     length caps. Durability mirrors the app push: a 200 awaits the persist.
     """
     state: DashboardState = request.app["state"]
-    # App tokens must never reach this endpoint (GPT 5.6 round 16): an app's
+    # App tokens must never reach this endpoint: an app's
     # declared ``permissions.api`` uses prefix-boundary matching, so an app
     # allowed ``/api/notifications`` is also admitted to this child route by
     # the auth middleware. This publish path is MCP/internal-secret only —
@@ -1123,10 +1121,9 @@ async def api_notification_agent_push(request: web.Request) -> web.Response:
     # rate limits / declared-channel checks. Apps publish through
     # POST /api/notifications where their
     # token-verified ``app:<name>`` source is enforced. The middleware publishes
-    # ``request["app"]`` on app-token auth and, since issue #3690, also on the
-    # internal-secret path whenever the calling session resolves to an app — so
-    # this check now bites for an app agent arriving over MCP too, which it
-    # could not before.
+    # ``request["app"]`` on app-token auth and also on the internal-secret path
+    # whenever the calling session resolves to an app, so this check bites for
+    # an app agent arriving over MCP too.
     if request.get("app"):
         # Permission denial on a security boundary — audited before the
         # response (backend-security-controls: every denial emits SEL).
@@ -1138,7 +1135,7 @@ async def api_notification_agent_push(request: web.Request) -> web.Response:
             error="app tokens forbidden on the agent publish path",
         )
         return web.json_response({"error": "forbidden for app tokens"}, status=403)
-    # MCP/internal-secret ONLY (GPT 5.6 round 19): the strict-internal
+    # MCP/internal-secret ONLY: the strict-internal
     # middleware also admits loopback dashboard-COOKIE callers to this
     # route, and a browser-credentialed caller publishing source="system"
     # would bypass MCP governance. The middleware sets
@@ -1154,7 +1151,7 @@ async def api_notification_agent_push(request: web.Request) -> web.Response:
             error="internal-secret authentication required (cookie callers forbidden)",
         )
         return web.json_response({"error": "internal-secret authentication required"}, status=403)
-    # A caller whose own slot is GONE cannot be attributed (issue #3690). The
+    # A caller whose own slot is GONE cannot be attributed. The
     # app-token check above refuses an app by name, but a tab closed while this
     # call was in flight takes the ``_app`` that check reads with it, so an
     # app-owned session going through that race would publish source="system"
@@ -1271,15 +1268,27 @@ def _redact_all(value: str) -> str:
 def _sanitize_blocks(
     blocks: list[dict],
     *redactors: Any,
+    display_form: bool = False,
 ) -> list[dict]:
     """Walk Block Kit blocks and sanitize all strings (both keys and values).
 
     Block Kit structural keys (type, text, mrkdwn, etc.) pass through
     sanitizers unchanged since they don't match hostile patterns.
+
+    With ``display_form=True`` each string is scanned through
+    :func:`redact_for_display` (composing the redactors via ``_redact_all``)
+    rather than by the literal redactors alone. That is the SAME floor the text
+    path uses, and it is what catches a credential split across Block Kit markup
+    — ``AKIA`` in one run and the rest bolded in the next — which the literal
+    scan sees only as fragments. Block text a caller controls is LLM-authored,
+    so it is exactly where such a split arrives.
     """
     from copy import deepcopy  # noqa: F811
 
     def _redact_str(s: str) -> str:
+        if display_form:
+            s, _ = redact_for_display(s, _redact_all)
+            return s
         for fn in redactors:
             s, _ = fn(s)
         return s
@@ -2105,7 +2114,9 @@ async def api_send_message(request: web.Request) -> web.Response:
     text, _ = redact_for_display(text, _redact_all)
     title, _ = redact_for_display(title, _redact_all)
     if blocks:
-        blocks = _sanitize_blocks(blocks, redact_exfiltration_urls, redact_credentials)
+        blocks = _sanitize_blocks(
+            blocks, redact_exfiltration_urls, redact_credentials, display_form=True
+        )
 
     # render [OPTIONS: ...] tags as interactive buttons on the
     # plain-text path (when the caller did not supply explicit blocks — those
@@ -2773,6 +2784,141 @@ async def api_delete_message(request: web.Request) -> web.Response:
         safe_error, _ = redact_credentials(safe_error)
         safe_error, _ = redact_exfiltration_urls(safe_error)
         return web.json_response({"error": f"Delete failed: {safe_error}"}, status=502)
+    return web.json_response({"ok": True})
+
+
+async def api_update_message(request: web.Request) -> web.Response:
+    """POST /api/update-message — edit a bot-authored Slack message in place.
+
+    The egress twin of ``api_delete_message``: same "the bot's own message"
+    addressing, but it PUBLISHES replacement content, so the outbound floor is
+    ``api_send_message``'s — ``redact_for_display`` over the text and
+    ``_sanitize_blocks`` over the blocks, before either reaches Slack.
+
+    Authorization is per target kind. A ROOM must be in the tracked-channel
+    allowlist, which is the operator's revocation lever rather than only a
+    first-contact check — without it a message the bot authored while the channel
+    was tracked would stay a writable slot in it after the operator revoked egress.
+    A DM must be the CURRENT owner's, resolved through the same
+    ``open_dm(owner_id)`` the send path uses, and fails closed when no owner is
+    configured or the lookup raises. Admitting every ``D`` channel on its prefix
+    would leave a FORMER owner's DM permanently writable, since ``owner_id``
+    changes and the DM channel id does not.
+
+    That is one notch stricter than the ``file_send`` Slack leg
+    (``dashboard/upload_destination.py::resolve_slack``), which still passes DMs on
+    the prefix. Deliberate: this endpoint publishes replacement content into a
+    message that is already there, so a wrong audience is not merely a new message
+    they can ignore.
+    """
+    # circular import: slack.handler imports from dashboard.* at module load
+    from kiro_crew.slack.handler import is_tracked_channel  # noqa: F811
+
+    state: DashboardState = request.app["state"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
+    channel = body.get("channel", "")
+    if not isinstance(channel, str):
+        return web.json_response(
+            {"error": "invalid channel ID format", "code": "invalid_channel"}, status=400
+        )
+    channel = channel.strip()
+    if not channel or len(channel) > CHANNEL_MAX_LEN or not CHANNEL_ID_RE.match(channel):
+        return web.json_response(
+            {"error": "invalid channel ID format", "code": "invalid_channel"}, status=400
+        )
+    ts = body.get("ts", "")
+    if not _is_slack_ts(ts):
+        return web.json_response(
+            {
+                "error": "ts must be a Slack timestamp string like '1712793600.123456'",
+                "code": "invalid_ts",
+            },
+            status=400,
+        )
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        return web.json_response(
+            {"error": "text must be a string", "code": "invalid_text"}, status=400
+        )
+    blocks = body.get("blocks")
+    if blocks is not None and not isinstance(blocks, list):
+        return web.json_response(
+            {"error": "blocks must be a list", "code": "invalid_blocks"}, status=400
+        )
+    if not text and not blocks:
+        return web.json_response(
+            {"error": "text or blocks required", "code": "content_required"}, status=400
+        )
+    # A DM is authorized by IDENTITY, a room by the tracked-channel allowlist --
+    # and a DM must be the CURRENT owner's, not merely D-prefixed. Passing every
+    # `D...` on the prefix alone would leave any DM this bot ever posted in a
+    # writable slot forever, including a FORMER owner's: `owner_id` changes, the
+    # old DM channel id does not, and an edit publishes new agent-authored text
+    # into it. So the prefix is a routing fact, never an authorization one.
+    #
+    # For rooms, tracking is the operator's revocation lever (see
+    # api_send_message's 403: "Add it to config.json ... restart the gateway"), not
+    # just a first-contact check -- a message this bot authored while the channel
+    # was tracked must not remain writable after the operator revoked egress.
+    #
+    # Both refused before any content processing, matching api_send_message's
+    # "Authorization gates (before any side effects)" ordering.
+    if channel.startswith("D"):
+        # Resolved through the same `open_dm(state.owner_id)` the send path uses
+        # (see the send_message Slack leg), so the two agree on who the owner is.
+        # Fail CLOSED when there is no owner configured or the lookup raises: an
+        # unresolvable owner means we cannot prove this DM is theirs.
+        owner_dm = ""
+        if state.owner_id and state.slack_client:
+            try:
+                owner_dm = await state.slack_client.open_dm(state.owner_id)
+            except Exception:
+                logger.warning("update_message: could not resolve the owner DM", exc_info=True)
+        denied = not owner_dm or channel != owner_dm
+        # Deliberately does NOT echo the resolved owner DM id: the refusal is
+        # returned to the caller that just failed authorization.
+        deny_reason = f"channel {channel} is not the owner's DM"
+        deny_code = "not_owner_dm"
+    else:
+        denied = not is_tracked_channel(channel)
+        deny_reason = f"channel {channel} not in tracked channels"
+        deny_code = "channel_not_tracked"
+    if denied:
+        _sel().log_tool_invocation(
+            session_key="api",
+            source="api",
+            tool_name="update_message",
+            tool_kind="slack",
+            outcome="denied",
+            downstream_service="slack",
+            resources=f"channel={channel}",
+        )
+        return web.json_response({"error": deny_reason, "code": deny_code}, status=403)
+    # Sanitize LLM-generated content before it reaches Slack, on the same
+    # DISPLAY-form floor api_send_message uses: the literal-form scan alone lets a
+    # markdown-collapse credential through, and an edit is posted as-is.
+    text, _ = redact_for_display(text, _redact_all)
+    if blocks:
+        blocks = _sanitize_blocks(
+            blocks, redact_exfiltration_urls, redact_credentials, display_form=True
+        )
+    slack = state.slack_client
+    if not slack:
+        return web.json_response(
+            {"error": "Slack not connected", "code": "slack_not_connected"}, status=503
+        )
+    try:
+        await slack.update_message(channel, ts, text, blocks)
+    except Exception as e:
+        safe_error = str(e).split("\n")[0][:200]
+        safe_error, _ = redact_credentials(safe_error)
+        safe_error, _ = redact_exfiltration_urls(safe_error)
+        return web.json_response(
+            {"error": f"Update failed: {safe_error}", "code": "update_failed"}, status=502
+        )
     return web.json_response({"ok": True})
 
 
@@ -3742,8 +3888,8 @@ async def _slack_config_save_locked(request: web.Request) -> web.Response:
         if cmd and (len(cmd) > 32 or not all(c.isalnum() or c in "-_" for c in cmd)):
             return _deny("command must be alphanumeric/-/_ and at most 32 chars")
         # Empty input resets to the default rather than silently keeping the
-        # old value — previously the slash command could be set but never
-        # cleared. Stage only on actual change: the UI sends the field on
+        # old value, so the slash command can be cleared. Stage only on actual
+        # change: the UI sends the field on
         # every save, and command is boot-read, so staging an unchanged value
         # would flag restart_required on every save.
         new_cmd = cmd or "kirocrew"
@@ -4749,7 +4895,7 @@ async def api_teams_activity(request: web.Request) -> web.Response:
     throttled_source = "" if is_proxied_request(request) else source
     if throttled_source and webhooks.auth_throttle_blocked(throttled_source):
         # A bare enqueue: SEL is warmed at gateway startup
-        # (sel.warm_sel_singleton, #8608), so even when this route is the
+        # (sel.warm_sel_singleton), so even when this route is the
         # first request a fresh gateway serves, no construction runs here.
         _sel().log_api_access(
             caller=source,
@@ -5064,14 +5210,14 @@ async def api_teams_config_save(request: web.Request) -> web.Response:
         _raw_teams_15: dict = {}
         try:
             # Offload read_text + json.loads to a thread so a slow filesystem
-            # cannot stall the async event loop (Finding 1).
+            # cannot stall the async event loop.
             def _read_config_15() -> dict:
                 return json.loads(_p15_cfg.read_text(encoding="utf-8")) if _p15_cfg.exists() else {}
 
             _rd15 = await asyncio.to_thread(_read_config_15)
             # Guard against a malformed config.json where "teams" is not a dict
             # (e.g. someone hand-edited it to a list).  .get() on a list raises
-            # AttributeError; the isinstance check degrades gracefully (Finding 3).
+            # AttributeError; the isinstance check degrades gracefully.
             _t15 = _rd15.get("teams")
             _raw_teams_15 = _t15 if isinstance(_t15, dict) else {}
         except Exception:
@@ -5080,7 +5226,7 @@ async def api_teams_config_save(request: web.Request) -> web.Response:
         _c_app_id = await asyncio.to_thread(read_env_file_credential, CRED_MICROSOFT_APP_ID)
         _c_tenant = await asyncio.to_thread(read_env_file_credential, CRED_MICROSOFT_APP_TENANT_ID)
         # ENV-first, matching load_credentials() semantics: os.environ overrides
-        # the .env file (Finding 2).  A pending in-flight update still wins as
+        # the .env file.  A pending in-flight update still wins as
         # the outermost layer (see env_updates.get() below).
         _c_pw = os.environ.get(CRED_MICROSOFT_APP_PASSWORD, "") or _c_pw
         _c_app_id = os.environ.get(CRED_MICROSOFT_APP_ID, "") or _c_app_id
@@ -5147,7 +5293,7 @@ async def api_teams_config_save(request: web.Request) -> web.Response:
             _f_tenant = await asyncio.to_thread(
                 read_env_file_credential, CRED_MICROSOFT_APP_TENANT_ID
             )
-            # ENV-first, matching load_credentials() semantics (Finding 2).
+            # ENV-first, matching load_credentials() semantics.
             _f_pw = os.environ.get(CRED_MICROSOFT_APP_PASSWORD, "") or _f_pw
             _f_app_id = os.environ.get(CRED_MICROSOFT_APP_ID, "") or _f_app_id
             _f_tenant = os.environ.get(CRED_MICROSOFT_APP_TENANT_ID, "") or _f_tenant
@@ -5212,7 +5358,7 @@ async def api_teams_config_save(request: web.Request) -> web.Response:
         # exists in .env / os.environ (so purging the config copy is safe).
         # Do NOT purge when the password lives ONLY in legacy config.json (no .env
         # entry, no env_update) — that would erase the sole credential copy and
-        # produce a dead pair at the next restart (Finding 1).
+        # produce a dead pair at the next restart.
         # _c_pw is only populated inside ``if credential_touched`` (Phase 1.5).
         # For metadata-only saves (credential_touched=False) fall back to a
         # synchronous os.environ check — load_credentials() seeds os.environ from
@@ -5857,7 +6003,7 @@ async def api_imessage_config_save(request: web.Request) -> web.Response:
             imessage_cfg.update(changes)
             # Shield + drain so a cancellation arriving mid-write cannot
             # release the config lock while the worker thread is still
-            # replacing the file (interleaved-write race, Finding 3).
+            # replacing the file (interleaved-write race).
             _cfg_write_task_im: asyncio.Task[None] = asyncio.ensure_future(
                 asyncio.to_thread(_atomic_json_write, path, data)
             )
@@ -6719,8 +6865,8 @@ async def _feishu_config_save_locked(request: web.Request) -> web.Response:
     # back. Reconciling here means a save that reported failure leaves no durable
     # folder change behind.
     # The staged value when we changed it, else what was already stored: `fs_cfg`
-    # is the VALIDATION snapshot and is no longer mutated in place, since the
-    # authoritative update now happens inside the lock.
+    # is the VALIDATION snapshot and is not mutated in place — the authoritative
+    # update happens inside the lock.
     _effective_folder = staged.get("session_folder", fs_cfg.get("session_folder"))
     _folder_name = stored_folder_name(_effective_folder)
     if _folder_name:

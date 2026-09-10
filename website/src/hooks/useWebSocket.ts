@@ -7,22 +7,29 @@ import { store } from '../store'
 import { sseStatus, sseYolo, sseConnected, sseDisconnected, sseSlots, sseTodoUpdate, sseMcpReportUpdate, setChannelTrusted, sseSlotTitle, triggerRefresh, fetchSlots, markSlotUnread, setUpdateProgress, sseSubagentStatus, sseSubagentText, touchSlotActivity, patchSlotSourceLinks, type SubagentDetail } from '../store/dashboardSlice'
 import { addNotification, ackNotificationByTs, unackNotificationByTs, removeNotificationByTs, clearAllNotifications, fetchNotifications, markBootNotificationsFetched } from '../store/notificationsSlice'
 import { dispatchMcNotification, TURN_DONE_KIND, APPROVAL_KIND, shouldChimeOnTurnDone } from './notificationEvent'
+import { shouldNotifyOnChatComplete } from './chatCompleteNotify'
 import { emitThemeSound } from './themeSound'
 import { streamingFlushHoldMs } from '../lib/streamHold'
 import { VoicePcmPlayer, voiceBoundary, createVoiceRequestId } from '../lib/voicePlayback'
 import { reportVoiceFailure } from '../lib/voiceFailure'
 import {
-  fetchHistory, missedChunkMarker, sseChatMessage, sseChatMessageUpdate, sseChatMessagePatchByTs, sseThinkingChunk, refreshSlot, warmSlotCache, sseContextUsage, clearMessages, clearSlotCache, setVoicePlaying, setVoiceAudio, resolveByApprovalId, clearSubagentsForSnapshot, sseSubagentPending, sseSubagentSpawn, sseSubagentQueued, sseSubagentTool, sseSubagentStalled, sseSubagentRetrying, sseSubagentDone, sseSubagentSnapshot, sseSubagentBatchUpdate, sseSubagentBatchChunks, sseToolActivity, sseToolResult, sseActivityEvent, sseSideResult, sseWorkflowEvent, setSlotStatusDetail, removeQueuedMessage, appendQueuedMessage, cancelQueuedMessage, editQueuedMessage, reorderQueuedMessages, appendSlotMessage, setQuestionCard, resolveQuestionCard, setFollowupCard, setFolderSuggestion, sseMcpAppRender, setGoalLoops, sseGoalLoop, sseSideQueue, reconcileWorkflowRuns
+  fetchHistory, missedChunkMarker, sseChatMessage, sseChatMessageUpdate, sseChatMessagePatchByTs, sseThinkingChunk, refreshSlot, warmSlotCache, sseContextUsage, clearMessages, clearSlotCache, setVoicePlaying, setVoiceAudio, resolveByApprovalId, clearSubagentsForSnapshot, sseSubagentPending, sseSubagentSpawn, sseSubagentQueued, sseSubagentTool, sseSubagentStalled, sseSubagentRetrying, sseSubagentDone, sseSubagentSnapshot, sseSubagentBatchUpdate, sseSubagentBatchChunks, sseToolActivity, sseToolResult, sseActivityEvent, sseSideResult, sseWorkflowEvent, setSlotStatusDetail, removeQueuedMessage, appendQueuedMessage, cancelQueuedMessage, editQueuedMessage, reorderQueuedMessages, appendSlotMessage, setQuestionCard, resolveQuestionCard, setFollowupCard, setFolderSuggestion, sseMcpAppRender, setAutomations, sseAutomation, removeAutomation, sseSideQueue, reconcileWorkflowRuns
 } from '../store/chatSlice'
 import { anchorForSlot, loadLayout, sessionSlots } from './splitLayoutStore'
 import { TAB_ID } from '../api/tabId'
 import { api } from '../api/client'
 import { AUTONUDGE_LOOPS_QUERY_KEY } from '../components/autoNudgeLoop'
+import { forgetUnobservedMemberThreads } from '../api/membersQuery'
 import { sanitizeLlmOutput } from '../utils/sanitize'
 import { applyStatusDelta, parseStatusDelta } from '../utils/pullRequestStatusDelta'
 import { slotChangeUrls } from '../utils/pullRequestLinks'
 import type { StatusData, ChatMessage, ChatSlot, ChatFolder, Notification, PullRequestStatusBatch, TodoList, McpSessionReport } from '../types'
 import { i18nT } from '../i18n/t'
+import {
+  dashboardAutomationSlotKey,
+  isFullLegacyAutomationRecord,
+  normalizeAutomationRecord,
+} from '../monitoring/automation'
 
 type LogCallback = ((data: { level: string; msg: string }) => void) | null
 
@@ -32,6 +39,8 @@ type LogCallback = ((data: { level: string; msg: string }) => void) | null
  *  channel (that is the live event stream), and the tick makes no request at all
  *  while no row is running. */
 const WORKFLOW_HEAL_MS = 15000
+const LEGACY_AUTOMATION_SEED_QUERY_KEY = ['automation-seed', 'legacy'] as const
+const STRUCTURED_AUTOMATION_SEED_QUERY_KEY = ['automation-seed', 'structured'] as const
 
 type VoiceProgress = {
   slot: string
@@ -62,6 +71,8 @@ function invalidateRefreshQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ['sessions-usage'] })
   qc.invalidateQueries({ queryKey: ['agents-installed'] })
   qc.invalidateQueries({ queryKey: ['mcp-tools'] })
+  // Prefix match on purpose: the Crew Members roster lives under this key
+  // (api/membersQuery.ts) and refreshes with the registry.
   qc.invalidateQueries({ queryKey: ['kirocrew-agents'] })
   qc.invalidateQueries({ queryKey: ['default-agent'] })
   qc.invalidateQueries({ queryKey: ['workspaces'] })
@@ -429,43 +440,163 @@ export function useWebSocket() {
     })
   }, [dispatch, stopVoice])
 
-  /** Bumped by every `autonudge_state` frame. A seed captures this before its
-   *  fetch and discards the response if a frame landed while it was in flight:
-   *  the seed's full-replace would otherwise resurrect a loop whose `removed`
-   *  frame we had already applied, and because frames fire only on CHANGE
-   *  nothing would ever correct it — leaving a phantom "Loop N/M" that
-   *  suppresses that row's unread dot until the next reconnect. */
-  const goalLoopGenRef = useRef(0)
+  /** Reconnects share one in-flight snapshot and its original watermark;
+   * live frames supersede a snapshot only for their own slot. Per-slot
+   * generations also retain removed-frame tombstones, so stale REST data cannot
+   * resurrect a record without dropping unaffected snapshot rows. */
+  const automationSeedGenRef = useRef(0)
+  const automationLiveGenRef = useRef(new Map<string, number>())
+  const automationSeedInFlightRef = useRef<Promise<void> | null>(null)
+  const automationSeedQueuedRef = useRef(false)
 
-  /** Cold-seed the sidebar's goal-loop map. `autonudge_state` only fires on
-   *  change, so a loop armed before this client connected would show no progress
-   *  until its next cycle fired — which can be minutes. Runs on first connect
-   *  and on every reconnect. Silent on failure and on the feature being
-   *  disabled (the endpoint answers `{enabled:false, loops:[]}`). */
-  const seedGoalLoops = useCallback(() => {
-    const gen = goalLoopGenRef.current
-    // Fully best-effort, including SYNCHRONOUS failure. This runs early in the
-    // connect handler, ahead of notification sync and the subagent subscribe, so
-    // an exception escaping here would silently strand those — a cosmetic seed
-    // must never be able to do that.
-    try {
-      // Same moment, same reason, for the full-registry readers: a stop that
-      // landed while the socket was down was a frame nobody received.
-      queryClient.invalidateQueries({ queryKey: AUTONUDGE_LOOPS_QUERY_KEY })
-      api.autonudgeList()
-        .then(res => {
-          // A live frame superseded this snapshot — it is now stale, so drop it
-          // rather than replacing fresher state with older state.
-          if (goalLoopGenRef.current !== gen) return
-          dispatch(setGoalLoops((res?.loops || []).map(loop => ({
-            slot: loop.slot_key,
-            active: loop.active === true,
-            cycle_count: Number(loop.cycle_count) || 0,
-            max_cycles: Number(loop.max_cycles) || 0,
-          }))))
+  /** Cold-seed the authoritative automation collection. `autonudge_state` only
+   *  fires on change, so a record armed before this client connected would be
+   *  absent until its next transition. Runs on first connect and reconnect. */
+  const seedAutomations = useCallback(() => {
+    // React Query coalesces equal in-flight fetches. Reuse the matching
+    // orchestration too, or a reconnect would capture a newer watermark for an
+    // older response and could resurrect a live tombstone. A reconnect still
+    // queues one fresh snapshot because the shared request may predate changes
+    // made while the socket was disconnected.
+    if (automationSeedInFlightRef.current) {
+      automationSeedQueuedRef.current = true
+      return
+    }
+    const startSeed = () => {
+      automationSeedQueuedRef.current = false
+      const seedGen = ++automationSeedGenRef.current
+      const liveAtStart = new Map(automationLiveGenRef.current)
+      const cacheUpdatesAtStart = new Map<string, number>()
+      for (const [queryKey] of queryClient.getQueriesData<
+        ReturnType<typeof normalizeAutomationRecord>
+      >({ queryKey: ['session-automation'] })) {
+        if (queryKey.length === 2 && typeof queryKey[1] === 'string') {
+          const slotKey = dashboardAutomationSlotKey(queryKey[1])
+          cacheUpdatesAtStart.set(
+            slotKey,
+            queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0,
+          )
+        }
+      }
+      // Fully best-effort, including SYNCHRONOUS failure. This runs early in the
+      // connect handler, ahead of notification sync and the subagent subscribe, so
+      // an exception escaping here would silently strand those — a cosmetic seed
+      // must never be able to do that.
+      let legacy: Promise<{ loops?: unknown[] }>
+      let structured: Promise<{ monitors?: unknown[] }>
+      let legacyStarted = true
+      let structuredStarted = true
+      try {
+        legacy = queryClient.fetchQuery({
+          queryKey: LEGACY_AUTOMATION_SEED_QUERY_KEY,
+          queryFn: api.autonudgeList,
+          staleTime: 0,
+          retry: false,
+        })
+      } catch {
+        legacyStarted = false
+        legacy = Promise.resolve({ loops: [] })
+      }
+      try {
+        structured = queryClient.fetchQuery({
+          queryKey: STRUCTURED_AUTOMATION_SEED_QUERY_KEY,
+          queryFn: api.monitorsList,
+          staleTime: 0,
+          retry: false,
+        })
+      } catch {
+        structuredStarted = false
+        structured = Promise.resolve({ monitors: [] })
+      }
+      let seed: Promise<void>
+      seed = Promise.allSettled([legacy, structured])
+        .then(([legacyResult, monitorResult]) => {
+          // Do not publish a snapshot known to predate a reconnect. The queued
+          // iteration starts from a new watermark after this request settles.
+          if (automationSeedQueuedRef.current) return
+          // A later reconnect supersedes this whole seed. Live frames are
+          // reconciled per slot below so unrelated snapshot rows still land.
+          if (automationSeedGenRef.current !== seedGen) return
+          const legacyComplete = legacyStarted && legacyResult.status === 'fulfilled'
+          const structuredComplete = structuredStarted && monitorResult.status === 'fulfilled'
+          const legacyRecords = legacyStarted && legacyResult.status === 'fulfilled'
+            ? (legacyResult.value.loops ?? []).filter(isFullLegacyAutomationRecord)
+                .map(normalizeAutomationRecord)
+                .filter(record => record?.kind === 'legacy_goal_loop')
+            : []
+          const structuredSnapshotRecords = structuredStarted && monitorResult.status === 'fulfilled'
+            ? (monitorResult.value.monitors ?? []).map(normalizeAutomationRecord)
+                .filter(record => record?.kind === 'structured_monitor')
+            : []
+          const stillFresh = (record: NonNullable<ReturnType<typeof normalizeAutomationRecord>>) =>
+            (automationLiveGenRef.current.get(record.slotKey) ?? 0)
+              === (liveAtStart.get(record.slotKey) ?? 0)
+          const protectedSlotSet = new Set([...automationLiveGenRef.current]
+            .filter(([slot, generation]) => generation !== (liveAtStart.get(slot) ?? 0))
+            .map(([slot]) => slot))
+          for (const [queryKey] of queryClient.getQueriesData<
+            ReturnType<typeof normalizeAutomationRecord>
+          >({ queryKey: ['session-automation'] })) {
+            if (queryKey.length !== 2 || typeof queryKey[1] !== 'string') continue
+            const slotKey = dashboardAutomationSlotKey(queryKey[1])
+            const cachedUpdates = queryClient.getQueryState(queryKey)?.dataUpdateCount
+            if (cachedUpdates !== cacheUpdatesAtStart.get(slotKey)) {
+              protectedSlotSet.add(slotKey)
+            }
+          }
+          const protectedSlots = [...protectedSlotSet]
+          const records = [...legacyRecords, ...structuredSnapshotRecords.filter(record => record.active)]
+            .filter(record => stillFresh(record) && !protectedSlotSet.has(record.slotKey))
+          const terminalRecords = new Map(structuredSnapshotRecords
+            .filter(record => !record.active && stillFresh(record)
+              && !protectedSlotSet.has(record.slotKey))
+            .map(record => [record.slotKey, record]))
+          // Terminal monitors refresh existing per-slot evidence without growing
+          // the global Redux collection or creating unvisited detail queries.
+          const presentSlots = new Set([
+            ...records.map(record => record.slotKey),
+            ...structuredSnapshotRecords
+              .filter(record => stillFresh(record) && !protectedSlotSet.has(record.slotKey))
+              .map(record => record.slotKey),
+          ])
+          for (const [queryKey, cached] of queryClient.getQueriesData<
+            ReturnType<typeof normalizeAutomationRecord>
+          >({ queryKey: ['session-automation'] })) {
+            if (queryKey.length !== 2 || typeof queryKey[1] !== 'string') continue
+            const slotKey = dashboardAutomationSlotKey(queryKey[1])
+            if (protectedSlotSet.has(slotKey)) continue
+            // A mutation or focused REST refetch may populate this per-slot
+            // cache while the reconnect snapshot is still in flight. Only an
+            // entry known to predate the seed can be absent authoritatively.
+            const cachedUpdates = queryClient.getQueryState(queryKey)?.dataUpdateCount
+            if (cachedUpdates !== cacheUpdatesAtStart.get(slotKey)) continue
+            const terminal = terminalRecords.get(slotKey)
+            if (terminal) {
+              queryClient.setQueryData(queryKey, terminal)
+            }
+            if (!cached || presentSlots.has(slotKey)) continue
+            const complete = cached.kind === 'legacy_goal_loop'
+              ? legacyComplete
+              : structuredComplete
+            if (complete) queryClient.setQueryData(queryKey, null)
+          }
+          dispatch(setAutomations({
+            records,
+            legacyComplete,
+            structuredComplete,
+            protectedSlots,
+          }))
         })
         .catch(() => {})
-    } catch { /* seed is cosmetic — never break the connect path */ }
+        .finally(() => {
+          if (automationSeedInFlightRef.current === seed) {
+            automationSeedInFlightRef.current = null
+            if (automationSeedQueuedRef.current) startSeed()
+          }
+        })
+      automationSeedInFlightRef.current = seed
+    }
+    startSeed()
   }, [dispatch, queryClient])
 
   const syncPendingApprovals = useCallback(async () => {
@@ -888,7 +1019,17 @@ export function useWebSocket() {
         // Invalidate every slot's summary (the key is per-slot and we cannot
         // know which ones moved); react-query only refetches the observed ones.
         queryClient.invalidateQueries({ queryKey: ['session-summary'] })
-        seedGoalLoops()
+        // A dropped socket is the one client-visible sign the gateway may have
+        // restarted — and a restart drops an unmessaged member slot while its
+        // binding survives. The Crew Members page mounts a cached thread key
+        // straight away on a return visit (api/membersQuery.ts), so a key
+        // confirmed BEFORE the drop is no longer known-mountable: forget the
+        // ones nobody is looking at, so the next open waits for the thread
+        // endpoint's answer again; the mounted one is re-confirmed by the page
+        // itself on this same reconnect (and must NOT be cleared here — it
+        // holds the pane, and the draft typed into it).
+        forgetUnobservedMemberThreads(queryClient)
+        seedAutomations()
         dispatch(fetchNotifications()).then(() => syncPendingApprovals())
       syncPendingQuestions()
         // Same one-shot problem, different stream: a run that ENDED while the
@@ -941,7 +1082,7 @@ export function useWebSocket() {
       }
       wasConnectedRef.current = true
       dispatch(sseConnected())
-      seedGoalLoops()
+      seedAutomations()
       // FIRST connect only: App's mount effect already dispatched fetchSlots,
       // and this handler fires strictly after it, so repeating it here is a
       // redundant round-trip at the worst possible moment. The reconnect branch
@@ -1477,6 +1618,16 @@ export function useWebSocket() {
               const buf = chunkBufRef.current
               let entry = buf.get(cs)
               if (!entry) { entry = { content: '', lastSeq: undefined, thinking: '' }; buf.set(cs, entry) }
+              // Idempotency guard: drop a replayed/repeated chunk (seq <= lastSeq).
+              // WS delivery is at-least-once (reconnect replay, retry re-stream), so a
+              // chunk can arrive twice. missedChunkMarker below only flags FORWARD gaps
+              // (curSeq - prevSeq - 1 > 0), so a repeat slips through and its content is
+              // appended a second time with no marker — the silent mid-stream "stutter".
+              // chat_done deletes the buffer entry, so lastSeq resets each turn and a
+              // fresh turn's seq is never suppressed.
+              if (entry.lastSeq !== undefined && data.seq !== undefined && data.seq <= entry.lastSeq) {
+                break
+              }
               // Cross-chunk gap detection via the shared missedChunkMarker,
               // single-sourced with the reducer so the two copies can't drift.
               if (entry.lastSeq !== undefined && data.seq !== undefined) {
@@ -1816,8 +1967,9 @@ export function useWebSocket() {
               if (last) flushVoiceTail(data.slot, last)
             }
             dispatch(sseChatMessage({ ...data, role: '_done' }))
-            // Turn-complete chime: sound-only (no feed entry, no toast).
-            // Plays on every real turn completion — active or background
+            // Turn-complete chime: sound-only (no feed entry, and no toast of
+            // its own — the opt-in one below is a separate branch on its own
+            // gate). Plays on every real turn completion — active or background
             // chat — and never during reconnect catch-up replay.
             // Preset/volume/mute resolve in useNotificationSound via the
             // 'turn' category.
@@ -1826,6 +1978,28 @@ export function useWebSocket() {
               reconnecting: reconnectingRef.current,
             })) {
               dispatchMcNotification(TURN_DONE_KIND)
+            }
+            // Opt-in native toast, default OFF, and gated on the user being
+            // AWAY — deliberately not the chime's gate, which ignores focus so
+            // every turn is audible. Titled with the finishing session so a
+            // user tracking several background threads learns which one is
+            // done; `tag` is per-slot so concurrent completions coalesce per
+            // session instead of overwriting one another.
+            if (shouldNotifyOnChatComplete({
+              slot: data.slot,
+              reconnecting: reconnectingRef.current,
+            })) {
+              const doneSlot = data.slot as string
+              const doneTitle = store.getState().dashboard.slots
+                .find(s => s.key === doneSlot)?.title || doneSlot
+              // Android Chrome throws "Illegal constructor" for page-context
+              // Notification; an uncaught throw here kills the whole message
+              // handler, so the native toast is best-effort (same as approval).
+              try {
+                new Notification(doneTitle, { body: i18nT('hooks.useWebSocket.response_ready'), tag: `kirocrew-chat-done:${doneSlot}` })
+              } catch {
+                /* unsupported platform */
+              }
             }
             if (data.slot && data.slot !== store.getState().chat.activeSlot && !reconnectingRef.current) {
               dispatch(markSlotUnread(data.slot))
@@ -1884,31 +2058,42 @@ export function useWebSocket() {
             }
             break
           case 'autonudge_state': {
-            // Broadcast for ChatPage to refresh its autonudge loop state.
-            window.dispatchEvent(new CustomEvent('autonudge_state', { detail: data }))
-            // Mirror into the store as well, so the sidebar can show progress on
-            // EVERY looping row instead of only the active slot (ChatPage's
-            // listener filters to `activeSlot`). The service emits one event per
-            // fired cycle, which is what makes the cycle counter tick live.
+            // One transport path feeds the authoritative collection consumed by
+            // both the sidebar and active-slot detail surface.
             const nudge = data as unknown as {
               event?: string
               slot?: string
-              loop?: { active?: boolean; cycle_count?: number; max_cycles?: number }
+              loop?: Record<string, unknown>
             }
             if (nudge.slot) {
+              const slot = dashboardAutomationSlotKey(nudge.slot)
+              if (nudge.event === 'removed') {
+                // A failed refetch must not leave the detail query able to
+                // resurrect a record the live stream authoritatively removed.
+                queryClient.setQueryData(['session-automation', slot], null)
+                // The removal is authoritative for the current frame, but a
+                // refresh still catches a successor created concurrently.
+                queryClient.invalidateQueries({ queryKey: ['session-automation', slot] })
+              }
               // Bump BEFORE dispatching so an in-flight seed is invalidated even
               // if its .then() runs immediately after this frame is handled.
-              goalLoopGenRef.current++
-              dispatch(sseGoalLoop({
-                slot: nudge.slot,
-                // `removed` still carries the loop object (the gateway observer
-                // only fires when `loop is not None`), and its `active` flag is
-                // whatever it was at removal — so the event name, not the flag,
-                // decides a removal.
-                active: nudge.event !== 'removed' && nudge.loop?.active === true,
-                cycle_count: Number(nudge.loop?.cycle_count) || 0,
-                max_cycles: Number(nudge.loop?.max_cycles) || 0,
-              }))
+              automationLiveGenRef.current.set(
+                slot,
+                (automationLiveGenRef.current.get(slot) ?? 0) + 1,
+              )
+              if (nudge.event === 'removed') {
+                dispatch(removeAutomation(slot))
+                queryClient.invalidateQueries({ queryKey: AUTONUDGE_LOOPS_QUERY_KEY })
+                break
+              }
+              const record = normalizeAutomationRecord(nudge)
+              if (record) {
+                // The live projection is already authoritative and normalized;
+                // cache it directly instead of issuing one REST request for
+                // every probe frame.
+                queryClient.setQueryData(['session-automation', slot], record)
+                dispatch(sseAutomation(record))
+              }
             }
             // Readers of the FULL registry (the Crew Members drawer's patrol
             // block needs stopped_reason, next_due_ts and banner, none of which
@@ -2080,7 +2265,7 @@ export function useWebSocket() {
     }
 
     ws.onerror = () => { /* onclose will fire */ }
-  }, [dispatch, flushChunks, flushBufferedThinking, scheduleChunkFlush, bufferSlotActivity, bufferSubagentChunk, flushSubagentChunks, playNextVoiceChunk, flushVoiceTail, queryClient, stopVoice, getPcmPlayer, syncPendingApprovals, syncPendingQuestions, syncWorkflowRuns, seedGoalLoops, recordRetiredId])
+  }, [dispatch, flushChunks, flushBufferedThinking, scheduleChunkFlush, bufferSlotActivity, bufferSubagentChunk, flushSubagentChunks, playNextVoiceChunk, flushVoiceTail, queryClient, stopVoice, getPcmPlayer, syncPendingApprovals, syncPendingQuestions, syncWorkflowRuns, seedAutomations, recordRetiredId])
 
   /**
    * Force an immediate reconnect: cancels any pending backoff timer, closes

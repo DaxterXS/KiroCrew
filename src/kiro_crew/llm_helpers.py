@@ -22,8 +22,13 @@ from kiro_crew import name_grant
 from kiro_crew.acp.client import AcpError, AcpPromptBusy, advertised_model_ids
 from kiro_crew.acp.types import EVENT_STEER_CONSUMED, TurnUsage
 from kiro_crew.config.loader import KiroCrewConfig
+from kiro_crew.credential_errors import is_credential_propagation_delay
 from kiro_crew.hooks import _EDIT_TOOL_KIND, fire_tool_hooks, get_global_hook_store
-from kiro_crew.platform.tool_paths import target_paths
+from kiro_crew.platform.tool_paths import (
+    command_shaped_strings,
+    edit_target_candidates,
+    is_document_writing_tool,
+)
 from kiro_crew.providers.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -86,7 +91,10 @@ _JITTER_RNG = random.Random()
 # Matched against the formatted AcpError message (see acp.client._format_acp_error).
 # Auth/validation markers are deliberately ABSENT so those fail fast — a retry
 # cannot fix an expired token or a bad request, and silently retrying them would
-# only delay the correct "re-auth"/"fix the request" signal to the operator.
+# only delay the correct "re-auth"/"fix the request" signal to the operator. The
+# one auth-shaped exception (a credential IAM has not propagated yet) is handled
+# structurally in _is_transient_acp_error, ABOVE the exclusion list, because no
+# marker here could ever be reached for it — see is_credential_propagation_delay.
 _TRANSIENT_MARKERS = (
     "internal server error",
     "internal error: api error",
@@ -119,6 +127,11 @@ _TRANSIENT_MARKERS = (
     # straight and typographic quotes both match the substring.
     "selected is temporarily unavailable",
     "transient error (http 5xx)",  # _format_acp_error's generic-5xx message
+    # IAM credential-propagation race, matched against _format_acp_error's
+    # rewritten wording. The RAW provider sentence ("The security token included
+    # in the request is invalid") is matched structurally instead — see the
+    # is_credential_propagation_delay call below.
+    "credential-propagation delay",
 )
 
 
@@ -126,6 +139,12 @@ def _is_transient_acp_error(msg: str) -> bool:
     """True iff an AcpError message looks like a retryable transient backend
     failure. Auth failures are explicitly excluded (they need re-auth, not retry)."""
     low = msg.lower()
+    if is_credential_propagation_delay(msg):
+        # The one auth-shaped failure a retry DOES fix: a credential IAM has not
+        # propagated yet. Checked BEFORE the exclusions below because Bedrock
+        # ships this rejection AS UnrecognizedClientException, so the
+        # short-circuit would return False and no marker could ever be reached.
+        return True
     if (
         "authentication failed" in low
         or "accessdenied" in low
@@ -155,6 +174,27 @@ def is_transient_backend_error(msg: str) -> bool:
     backend failure (5xx / throttle / stream-reset) rather than an
     auth/validation error. Public alias of :func:`_is_transient_acp_error`."""
     return _is_transient_acp_error(msg)
+
+
+def is_prompt_busy(exc: BaseException) -> bool:
+    """True when *exc* says the backend already holds an in-flight prompt.
+
+    Structural first, with the substring as a fallback: ``_format_acp_error``
+    rewrites the backend's "prompt already in progress" into friendly prose that
+    drops the marker, so a string-only check silently loses the recovery for
+    every producer that formats before raising — which the shared-runtime
+    ``AcpSessionHandle`` does. The fallback still covers unformatted /
+    history-restored messages, and stays scoped to ``AcpError`` so an unrelated
+    exception that happens to mention progress is never mistaken for a wedge.
+
+    Shared with ``channel.run_channel_agent``, whose recovery is the same
+    contract (replace the session, replay once) reached from a different surface.
+    One predicate, so the two cannot come to disagree about what a wedge IS —
+    and so a consumer outside this module never needs the ACP layer to ask.
+    """
+    return isinstance(exc, AcpPromptBusy) or (
+        isinstance(exc, AcpError) and "already in progress" in str(exc)
+    )
 
 
 def acp_error_is_transient(exc: BaseException) -> bool:
@@ -917,9 +957,13 @@ def _extract_tool_input_strings(tool_input: str) -> list[str]:
 # gateway and losing the whole turn.
 #
 # Known cost of that trade: a permission-gated write of a benign file larger
-# than this lands its whole content in ``tool_input`` and is refused. The durable
-# fix is to stop running the SHELL-COMMAND matcher over fields that never carry a
-# command. Tracked in https://github.com/kirodotdev/KiroCrew/issues/8053.
+# than this lands its whole content in ``tool_input`` and is refused WHEN the
+# frame's provenance is unknown. An edit with trusted provenance is judged by
+# its target path instead (``_edit_target_denial``), and every other non-shell
+# tool with trusted provenance has its document-body fields skipped
+# (``platform.tool_paths.command_shaped_strings``), so neither reaches this
+# ceiling on a body; the residual is the unclassified frame, which keeps the
+# full scan by design. Tracked in https://github.com/kirodotdev/KiroCrew/issues/8053.
 #
 # One number for both tiers: the shell gate refuses a command above
 # ``security.MAX_SCANNABLE_COMMAND_CHARS`` on its own (every caller, not only
@@ -965,9 +1009,9 @@ def _edit_target_denial(
     read the document as a shell command line, so writing a Markdown page that says
     ``git push origin main``, a docstring that says ``kirocrew restart``, or prose
     that names ``~/.ssh`` was refused -- and a body over
-    :data:`_MAX_SCANNABLE_TOOL_INPUT_CHARS` was refused for its LENGTH (#8812). That
-    is the same defect class #9082 closed for cron script bodies: a document is not
-    the shell gate's subject.
+    :data:`_MAX_SCANNABLE_TOOL_INPUT_CHARS` was refused for its LENGTH (the
+    tool-input length-cap defect). That is the same class the cron-script body
+    gate rework closed: a document is not the shell gate's subject.
 
     What an edit can actually do is decided by WHERE it writes, so the gate for an
     edit is the resolved target path, exactly as ``hooks.on_tool_call`` decides it:
@@ -982,25 +1026,32 @@ def _edit_target_denial(
     may stream trusted params that carry no path key at all and name the file
     only in that block (``_dispatch`` caches it per toolCallId onto the
     permission event as ``diff_path``), so judging the params alone would judge
-    nothing. Fail-closed on an EMPTY union: an edit whose params and content
-    block together name no target has no proven target to judge, and is denied
-    rather than approved blind -- the document scan is not a fallback here,
-    because a document that happens to contain no denied text is not evidence
-    that the write is safe (#8812 is exactly a document being read as a
-    command; #9082 is the same class). The caller only reaches this on trusted
-    provenance (see ``_resolve_permission``); an edit with no params at all
-    never gets here and keeps the document scan.
+    nothing. Two unverifiable shapes fail closed: an EMPTY union (an edit whose
+    params and content block together name no target has no proven target to
+    judge, and the document scan is not a fallback here -- a document that
+    happens to contain no denied text is not evidence that the write is safe),
+    and an UNANCHORED diff path (relative after ``~``/env expansion, which
+    resolves against the gateway CWD rather than the agent workspace, so its
+    sensitivity cannot be established -- see ``edit_target_candidates``). The
+    caller reaches this on trusted provenance (see ``_resolve_permission``) or
+    on a client-cached diff block, which is write-plane evidence on its own;
+    a call with neither trusted params nor a diff block never gets here and
+    keeps the document scan.
     """
-    paths = target_paths(raw_params)
-    if paths.truncated:
+    candidates = edit_target_candidates(raw_params, diff_path)
+    if candidates.truncated:
         return (
             "path",
             "Blocked: tool arguments too large to verify for sensitive paths " "(deny-by-default)",
             "",
         )
-    candidates = list(paths)
-    if diff_path and diff_path not in candidates:
-        candidates.append(diff_path)
+    if candidates.unanchored:
+        return (
+            "path",
+            "Blocked: file edit names a relative target path that cannot be "
+            "verified (deny-by-default)",
+            "",
+        )
     if not candidates:
         return (
             "path",
@@ -1334,7 +1385,7 @@ def _attempt_usage(provider: Any, *, since: Any = _NO_PRIOR_STATS) -> TurnUsage:
         # predating the converter) fall through to the credits-only constructor,
         # which is byte-identical for the kiro seam. The converter's failure is
         # contained so a faulty to_turn_usage degrades to the credits read
-        # rather than silently zeroing a turn that previously billed.
+        # rather than silently zeroing a turn that did bill.
         to_usage = getattr(stats, "to_turn_usage", None)
         if callable(to_usage):
             try:
@@ -1837,18 +1888,14 @@ async def stream_and_collect(
             return result_text
         except AcpError as exc:
             msg = str(exc)
-            # Prompt-busy is matched STRUCTURALLY first, with the substring kept
-            # as a fallback. _format_acp_error rewrites the backend's "prompt
-            # already in progress" into friendly prose that no longer carries
-            # the marker, so a string-only check silently loses BOTH arms below
-            # (cancel+retry and PromptBusyExhaustedError) for any producer that
-            # formats before raising — which the shared-runtime AcpSessionHandle
-            # now does. Unattended callers (workflows/agent_pool, handlers/side,
-            # the subagent-completion injector) depend on those arms to reset a
-            # wedged parent session, so losing them surfaces a generic failure
-            # and leaves the session stuck. The fallback still covers
-            # unformatted / history-restored messages.
-            busy = isinstance(exc, AcpPromptBusy) or "already in progress" in msg
+            # See is_prompt_busy for why this is structural rather than a
+            # substring test. Both arms below (cancel+retry and
+            # PromptBusyExhaustedError) hang off it, and the unattended callers
+            # (workflows/agent_pool, handlers/side, the subagent-completion
+            # injector) depend on them to reset a wedged parent session, so a
+            # missed wedge surfaces a generic failure and leaves the session
+            # stuck.
+            busy = is_prompt_busy(exc)
 
             # ── Case 1: prompt-busy (provider mid-turn) — cancel + retry. ──
             if busy:
@@ -2220,18 +2267,65 @@ async def _resolve_permission(
         )
         else None
     )
-    _input_strings = (
-        []
-        if _edit_params is not None
-        else (_extract_tool_input_strings(_tool_input) if _tool_input else [])
+    # Target-gating and document-scan suppression are SEPARATE decisions. A
+    # diff content block is write-plane evidence on its own — ``diff_path`` is
+    # the client's own cache from the preceding tool_call frame, not the
+    # agent-influenced ``kind`` — so the target denial also runs for a
+    # kindless or mislabelled non-shell call that carries one (strictly
+    # tightening: that call keeps its document scan below AND gains the
+    # target gate). Suppressing the document scan stays keyed on the fully
+    # trusted edit reroute (``_edit_params is not None``) alone.
+    _edit_target_gated = _edit_params is not None or bool(event.diff_path and not event.is_shell)
+    # Every OTHER non-shell tool with client-established provenance gets a
+    # FIELD-SCOPED scan: the same three predicates, over every string in the
+    # trusted params except a document body (``platform.tool_paths.
+    # DOCUMENT_BODY_KEYS`` -- ``content``, ``fileText``, ``newStr``, ...). A body
+    # is prose or source, and reading it as a shell command line refused a write
+    # that merely QUOTED ``rm -rf /`` or named a credential path. Provenance is
+    # the client's, never the payload's: ``shell_classified`` with ``is_shell``
+    # False (the shell cache the preceding tool_call frame populated -- a shell
+    # tool keeps the full scan, for it ``command`` IS what executes),
+    # ``raw_params_trusted`` (params from that same cache, so the strings judged
+    # are the ones that execute), and ``mcp_identity_trusted`` (the tool_name /
+    # server caches HIT, so the tool is a resolved built-in or a resolved MCP
+    # tool, not an unknown), and the resolved name must be a BUILT-IN document
+    # writer (``platform.tool_paths.is_document_writing_tool``): an MCP tool can
+    # execute whatever it calls ``content``, so its fields are all scanned. A frame
+    # missing any of those attributes, or carrying it as false, is an UNKNOWN tool
+    # and keeps the full document scan (fail closed). Every non-body string --
+    # a ``command`` word, a path, a URL -- still reaches the scan, and a walk
+    # that hits its work cap is denied as unverifiable.
+    _scoped_params = (
+        event.raw_tool_params
+        if (
+            _edit_params is None
+            and getattr(event, "shell_classified", False)
+            and not event.is_shell
+            and getattr(event, "raw_params_trusted", False)
+            and getattr(event, "mcp_identity_trusted", False)
+            and is_document_writing_tool(
+                getattr(event, "tool_name", ""), getattr(event, "mcp_server_name", "")
+            )
+            and isinstance(getattr(event, "raw_tool_params", None), dict)
+        )
+        else None
     )
+    _scoped_truncated = False
+    if _edit_params is not None:
+        _input_strings: list[str] = []
+    elif _scoped_params is not None:
+        _scoped_strings = command_shaped_strings(_scoped_params)
+        _scoped_truncated = _scoped_strings.truncated
+        _input_strings = list(_scoped_strings)
+    else:
+        _input_strings = _extract_tool_input_strings(_tool_input) if _tool_input else []
 
     def _scan_off_loop() -> tuple[str, str, str, str] | None:
         # One worker hop for the title and the whole tool_input loop. Both are
         # regex-heavy over agent-supplied text; on the event loop a ~9 KB shell
         # title held the loop past the 25 s stall watchdog and took the gateway
-        # down (the title tier used to run inline here while only the tool_input
-        # tier was offloaded, so that crash path survived the first offload).
+        # down (an inline title tier with only the tool_input
+        # tier offloaded leaves exactly that crash path open).
         # ``re`` HOLDS the GIL for one match call, so the hop does not keep the
         # loop live inside a single scan -- the linear patterns and the size
         # ceiling do that; what the hop buys is the realpath I/O inside
@@ -2241,10 +2335,19 @@ async def _resolve_permission(
         title_hit = _title_denial(normalized, _denied_regexes)
         if title_hit is not None:
             return (title_hit[0], title_hit[1], normalized, "always_deny")
-        if _edit_params is not None:
+        if _edit_target_gated:
             edit_hit = _edit_target_denial(_edit_params, event.diff_path)
             if edit_hit is not None:
                 return (*edit_hit, "always_deny_input")
+        if _scoped_truncated:
+            # The field-scoped walk could not finish, so the strings it did
+            # collect are not the whole payload: refuse rather than scan a part.
+            return (
+                "oversize",
+                "Blocked: tool arguments too large to security-scan (deny-by-default)",
+                "",
+                "always_deny_input",
+            )
         if _input_strings:
             input_hit = _first_tool_input_denial(_input_strings, _denied_regexes)
             if input_hit is not None:
@@ -2272,8 +2375,12 @@ async def _resolve_permission(
             app=app,
             tool_kind=event.tool_kind,
             raw_params=event.raw_tool_params,
+            diff_path=event.diff_path,
             command=event.shell_command,
             is_shell=event.is_shell,
+            mcp_server_name=event.mcp_server_name,
+            mcp_tool_name=event.tool_name,
+            mcp_identity_trusted=event.mcp_identity_trusted,
         )
         if tool_result.action == TOOL_DENY:
             await provider.reject_tool(event.request_id)
@@ -2401,7 +2508,7 @@ def _extract_json_of_type(
             # error must not escape. Fail the WHOLE scan closed: a truncated
             # scan cannot certify a preferred match as unambiguous, so keeping
             # candidates collected before the bomb would let a worked example
-            # launder past the ambiguity refusal (GPT review, #4974 round 4).
+            # launder past the ambiguity refusal.
             # Callers already have recovery paths for None (schema retry loop,
             # the spine's forcing re-emit); salvaging a prefix of a reply that
             # contains a nesting bomb is not worth defeating them.
@@ -2544,7 +2651,7 @@ async def save_conversation_turn_off_loop(
     The whole turn is written under one :meth:`~kiro_crew.history.ConversationLog.atomic_appends`
     hold. ``append`` locks per ROW, so without it two concurrent turns for the
     same session could interleave into ``user_A, user_B, assistant_A,
-    assistant_B`` -- turns that no longer pair up, which no timestamp ordering can
+    assistant_B`` -- turns that do not pair up, which no timestamp ordering can
     repair because each row's ``ts`` is individually correct. On the loop that was
     impossible (a synchronous caller never yields between its two appends), so the
     hazard is introduced BY offloading and has to be closed here rather than

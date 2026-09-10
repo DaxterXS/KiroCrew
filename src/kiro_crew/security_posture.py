@@ -1281,6 +1281,12 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         # hygiene so a response echoing a credential or exfiltration URL cannot
         # leak into the log ring / /api/logs stream; not an egress boundary.
         "task_planner.py",
+        # Gate-side log hygiene, same shape as update_provider: redacts pip's
+        # stderr tail (an app requirements.txt can name an index URL carrying
+        # credentials) before the provisioning failure is written to the
+        # gateway log and to the app backend's own log file. Defensive
+        # scrubbing at the point of capture, not an output boundary.
+        "apps/backend.py",
         # Capture-side, not egress: the per-session MCP report scrubs a server
         # name and a failing server's startup error as it RECORDS them, so a
         # credential never enters the accumulator at all. Deliberately earlier
@@ -1336,8 +1342,12 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         # the dashboard only through routes.py, the registered sink.
         "apps/builtins/aws_control/backend/storage.py",
         # Same shape: scrubs profile names and STS-derived account metadata as
-        # the account snapshot is BUILT. It owns no output — the snapshot is
-        # served only through routes.py, the registered sink for this app.
+        # the account snapshot is BUILT, and the registry default that
+        # resolve_consent_target falls back to. It owns no output — the snapshot
+        # is served through routes.py, the registered sink for this app, and the
+        # resolved profile/region reach the paid-service consent card through
+        # dashboard/handlers/aws_consent.py; both read text this module already
+        # scrubbed.
         "apps/builtins/aws_control/backend/accounts.py",
         # Same shape, one layer earlier: scrubs runner-supplied job payload as the
         # run record is BUILT and persisted. `_redact` covers `step`, `error` and

@@ -41,6 +41,7 @@ import { clearPaneReady, removeWarm, setActiveId, setPaneReady, setUnread, setWa
 import InstanceTabBar, { visibleInstanceTabs, useCrewPins, toggleCrewPin, useCrewSwitcherStableOrder, setStableOrder } from './InstanceTabBar'
 import { parseLoopbackOriginPort, resolveTunnelOrigin } from '../lib/tunnelOrigin'
 import { frameDocumentState, paneLog, safePaneUrl } from '../lib/paneLog'
+import { clearPaneHttpCache, paneOriginFor } from '../lib/paneCache'
 import { connectInstanceInto } from '../lib/connectInstance'
 import { LINUX_CAPTION_CONTROLS_WIDTH, TRAFFIC_LIGHT_INSET_PX, WIN_CAPTION_OVERLAY_WIDTH } from '../lib/electron'
 import { isEmbeddedPane } from '../lib/embedded'
@@ -73,6 +74,11 @@ const REFRESH_MIN_INTERVAL_MS = 10_000
 // deps below precisely so that a re-mint arriving inside the window cannot
 // postpone it.
 const PANE_LOAD_TIMEOUT_MS = 15_000
+// Gap between successive auto-warm iframe mounts on first load (see the
+// auto-warm effect). Long enough for a tunnel's shell + entry bundle to land
+// before the next pane starts pulling its own; short enough that four panes
+// are all warm within the time the user spends reading the Local tab.
+const AUTO_WARM_STAGGER_MS = 1_500
 // How many reactive re-mints one pane may ask for before the parent stops
 // answering. The child posts `mc-auth-expired` on EVERY 403 it sees
 // (api/client.ts hands recovery to the hub before it latches its own banner),
@@ -165,6 +171,14 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
   // Reactive (mc-auth-expired) re-mints answered per pane since its last Retry
   // — see MAX_REACTIVE_REMINTS.
   const reactiveMintsRef = useRef<Map<string, number>>(new Map())
+  // Load watchdog verdict + forced-reload sequence, documented at their consumer
+  // (the watchdog effect below); declared here because the relay listener also
+  // bumps `reloadSeq` for the one-shot script-error heal.
+  const [timedOut, setTimedOut] = useState<Record<string, boolean>>({})
+  const [reloadSeq, setReloadSeq] = useState<Record<string, number>>({})
+  // Panes already granted their one automatic cache-evict-and-reload after a
+  // `script-error` (see the relay listener). Cleared by Retry.
+  const scriptErrorHealsRef = useRef<Set<string>>(new Set())
   // Live iframe elements by id, so the parent can postMessage the switcher model
   // into each embedded pane. Set/cleared by the iframe ref cb.
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map())
@@ -233,6 +247,13 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
   // backend already auto-reconnected the tunnel (connect() returns the cached
   // token without re-minting). Failures are swallowed: the sticky tab + in-pane
   // error/Retry panel handle an instance that can't be warmed.
+  //
+  // Connected-only, on purpose: auto-warm pre-mounts panes for tunnels that are
+  // ALREADY up; bringing one up is the fan-out's and the click's job. The
+  // gateway enforces that under its manager lock, so a warm that fires after
+  // the user disconnected the crew (the stagger below makes that window real)
+  // is declined server-side instead of re-opening the tunnel and re-persisting
+  // the intent the disconnect just cleared.
   const autoWarm = useCallback(
     async (id: string) => {
       try {
@@ -241,7 +262,7 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
         // auto-warm is no longer untraceable: it used to leave any PREVIOUS warm
         // entry in place with nothing in the log, and the user saw only
         // "loading" forever.
-        await connectInstanceInto(dispatch, id, 'auto-warm')
+        await connectInstanceInto(dispatch, id, 'auto-warm', { onlyIfConnected: true })
       } catch {
         // Already journaled by connectInstanceInto; the sticky tab + in-pane
         // panel handle an instance that cannot be warmed.
@@ -276,6 +297,12 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
     })
     for (const id of iframeRefCallbacks.current.keys()) {
       if (!warm[id]) iframeRefCallbacks.current.delete(id)
+    }
+    // The one-shot script-error heal is per LOAD: an evicted pane that re-warms
+    // is a new load and gets its budget back, otherwise its next poisoned-cache
+    // failure could only be healed by a manual Retry.
+    for (const id of scriptErrorHealsRef.current) {
+      if (!warm[id]) scriptErrorHealsRef.current.delete(id)
     }
   }, [warm])
 
@@ -409,8 +436,35 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
         // failure the journal could not: a pane whose shell loaded (200,
         // cross-origin) but never announced readiness was either a bundle that
         // never ran (no `boot`) or an App that mounted and got stuck before the
-        // bridge (a `boot` with no `ready`). Journal only, no state change.
-        paneLog('boot', { id, stage: typeof data.stage === 'string' ? data.stage : 'unknown' })
+        // bridge (a `boot` with no `ready`). Journal only, no state change --
+        // except `script-error`, below.
+        const stage = typeof data.stage === 'string' ? data.stage : 'unknown'
+        const src = typeof data.src === 'string' ? safePaneUrl(data.src) : undefined
+        paneLog('boot', { id, stage, src })
+        if (stage === 'script-error') {
+          // Posted by the pane's index.html shell (not its bundle, which never
+          // ran): the entry <script type=module> fired `error`, i.e. some chunk
+          // in its graph failed to FETCH. Whatever happens next, this pane is
+          // NOT ready: it may have been (a ready pane reloads itself after a
+          // bundle change and can land on a mid-swap 404), and a stale `ready`
+          // keeps the load watchdog off and the error panel unreachable, so a
+          // failed heal would leave a blank pane with no Retry. Retract first.
+          // The one cause a reload cannot fix by itself is a 404 the desktop's
+          // HTTP cache is replaying under this origin, so evict that origin's
+          // cache and reload once. ONCE: a 404 the gateway is really serving
+          // right now (dist/ mid-swap) would otherwise loop clear/reload
+          // forever; after the one attempt the (now armed) watchdog surfaces
+          // the error panel, and Retry re-opens the budget.
+          dispatch(clearPaneReady(id))
+          if (!scriptErrorHealsRef.current.has(id)) {
+            scriptErrorHealsRef.current.add(id)
+            paneLog('script-error-heal', { id, origin: e.origin })
+            const cleared = clearPaneHttpCache(e.origin)
+            const reload = () => setReloadSeq(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }))
+            if (cleared) void cleared.then(reload, reload)
+            else reload()
+          }
+        }
       } else if (data.type === 'mc-embedded-ready') {
         // The pane just (re)mounted and asked for the current model — send it now
         // rather than waiting for the next input-driven broadcast. Also record
@@ -477,7 +531,8 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
     // (via=retry). Retry can "succeed" as a request while warming nothing, and
     // the pane then reloads into the same stuck state — that case is the
     // `warm-declined` line the step emits.
-    mutationFn: (id: string) => connectInstanceInto(dispatch, id, 'retry'),
+    mutationFn: ({ id, rebuild }: { id: string; rebuild: boolean }) =>
+      connectInstanceInto(dispatch, id, 'retry', { rebuild }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['instances'] })
     },
@@ -490,8 +545,12 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
   // never stranded). `reloadSeq[id]` is bumped by Retry to force an iframe
   // remount even when the backend returns the SAME cached port+token (identical
   // src would otherwise not reload a dead frame).
-  const [timedOut, setTimedOut] = useState<Record<string, boolean>>({})
-  const [reloadSeq, setReloadSeq] = useState<Record<string, number>>({})
+  // (`timedOut`, `reloadSeq` and `scriptErrorHealsRef` are declared up by
+  // reactiveMintsRef: the relay listener above reaches them too.)
+  // Live mirror of `timedOut` for `retry`, which must read the verdict at press
+  // time without re-creating itself on every watchdog flip.
+  const timedOutRef = useRef(timedOut)
+  timedOutRef.current = timedOut
   const activeWarmConn = activeId ? warm[activeId] : undefined
   // Apply the INCOMING pane's chrome state at switch time. The store otherwise
   // keeps whatever the outgoing surface last reported — and a switch necessarily
@@ -592,19 +651,45 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
 
   const retry = useCallback(
     (id: string) => {
+      const frame = frameDocumentState(iframeRefs.current.get(id))
+      // A watchdog verdict on a document that DID navigate is the one case a
+      // plain reconnect cannot fix: the tunnel answers every probe, so the
+      // idempotent connect returns the same forwarder, and the pane reloads
+      // into the same stalled module graph (one hashed-chunk stream that never
+      // finishes over that TCP path). Ask the gateway to rebuild the tunnel —
+      // a new forwarder on a different local port (the freed one is excluded
+      // from the allocation) — so the reload rides neither the stalled stream
+      // nor whatever may be wrong with the old port. A pane
+      // that never navigated (`about:blank`) or whose connect itself failed
+      // keeps the cheap path: there is no stalled stream to escape.
+      const rebuild = !!timedOutRef.current[id] && frame === 'cross-origin'
+      const port = warmRef.current[id]?.port
       // Clear the stale verdict and force a reload even if the re-mint returns
       // an identical token (setWarm would be a no-op for the iframe src).
       paneLog('retry', {
         id,
-        port: warmRef.current[id]?.port,
-        frame: frameDocumentState(iframeRefs.current.get(id)),
+        port,
+        frame,
+        rebuild: rebuild || undefined,
       })
-      setTimedOut(prev => ({ ...prev, [id]: false }))
-      setReloadSeq(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }))
-      // An explicit user press is a fresh start: re-open the reactive budget so
-      // a pane that recovers on the next token can still self-heal afterwards.
-      reactiveMintsRef.current.delete(id)
-      connectMutation.mutate(id)
+      const proceed = () => {
+        setTimedOut(prev => ({ ...prev, [id]: false }))
+        setReloadSeq(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }))
+        // An explicit user press is a fresh start: re-open the reactive budget so
+        // a pane that recovers on the next token can still self-heal afterwards,
+        // and the one-shot script-error heal likewise.
+        reactiveMintsRef.current.delete(id)
+        scriptErrorHealsRef.current.delete(id)
+        connectMutation.mutate({ id, rebuild })
+      }
+      // Desktop only: evict this origin's HTTP cache BEFORE the reload, so a
+      // chunk 404 the cache is replaying (the failure a tunnel rebuild cannot
+      // reach) is re-fetched rather than replayed again. Resolves fast (one IPC
+      // round-trip) and the reload proceeds whatever it answers. A pane that
+      // never navigated has no port to name and nothing cached to evict.
+      const cleared = typeof port === 'number' ? clearPaneHttpCache(paneOriginFor(port)) : null
+      if (cleared) void cleared.then(proceed, proceed)
+      else proceed()
     },
     [connectMutation],
   )
@@ -659,6 +744,19 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
   // activeId: the dashboard always lands on the Local tab and the warmed iframes
   // sit hidden and ready. Down instances are skipped (they stay sticky error
   // tabs); this runs once per mount. warmRef avoids re-firing on warm changes.
+  //
+  // Staggered, not simultaneous. Each warm mounts an iframe that immediately
+  // pulls a ~4 MB module graph (~240 hashed chunks) over a just-opened SSH
+  // tunnel, and the tunnels themselves were raised seconds earlier by the
+  // auto-connect fan-out. Four panes cold-loading in the same second is the
+  // exact condition under which one stream stalled and its pane never
+  // finished loading (see pane-asset-journal in the desktop shell). One warm
+  // per AUTO_WARM_STAGGER_MS keeps the loads sequential enough that a single
+  // tunnel's first bytes are not competing with three others' bulk transfer.
+  // The user's active pane is never delayed by this: it is warmed by the
+  // select path, not here.
+  const autoWarmTimersRef = useRef<number[]>([])
+  useEffect(() => () => { for (const t of autoWarmTimersRef.current) window.clearTimeout(t) }, [])
   const didAutoWarmRef = useRef(false)
   useEffect(() => {
     const data = instancesQuery.data
@@ -669,7 +767,28 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
     const candidates = data.instances
       .filter(i => i.status?.state === 'connected' && !warmRef.current[i.id])
       .slice(0, room)
-    for (const inst of candidates) void autoWarm(inst.id)
+    // Timers live in a ref and are cleared only on unmount: this effect re-runs
+    // on every instances poll (its deps include the query data), and a cleanup
+    // returned from it would cancel the pending warms after the first poll
+    // while the once-only guard above stops them from ever being re-armed.
+    //
+    // The delay opens a window the immediate fan-out never had: the user can
+    // disconnect a crew before its timer fires. That race is closed on the
+    // gateway, not here: autoWarm asks for a connected-only connect, which the
+    // manager evaluates under the same lock disconnect holds, so a late warm
+    // is declined (`warm-declined`) rather than re-opening the tunnel. The one
+    // thing worth checking client-side is whether something else (a click)
+    // already warmed the pane meanwhile — then the warm is simply redundant.
+    autoWarmTimersRef.current = candidates.map((inst, i) =>
+      window.setTimeout(() => {
+        if (warmRef.current[inst.id]) {
+          paneLog('auto-warm-skipped', { id: inst.id, index: i, alreadyWarm: true })
+          return
+        }
+        if (i > 0) paneLog('auto-warm-staggered', { id: inst.id, index: i, delayMs: i * AUTO_WARM_STAGGER_MS })
+        void autoWarm(inst.id)
+      }, i * AUTO_WARM_STAGGER_MS),
+    )
   }, [instancesQuery.data, warmCap, autoWarm])
 
   const warmIds = useMemo(() => Object.keys(warm), [warm])
@@ -840,13 +959,13 @@ export default function InstancesViewport({ macInset = false }: { macInset?: boo
 
   const panelState = activeInst?.status?.state
   const panelConnecting =
-    (connectMutation.isPending && connectMutation.variables === activeId) ||
+    (connectMutation.isPending && connectMutation.variables?.id === activeId) ||
     panelState === 'connecting'
   // The Retry's own rejection used to reach only `paneLog`: the panel kept
   // showing the LIST's last status.error (or nothing) while the connect that
   // just failed said something newer. The mutation's error for THIS crew wins
   // while it is the latest thing that happened.
-  const connectFailure = connectMutation.isError && connectMutation.variables === activeId
+  const connectFailure = connectMutation.isError && connectMutation.variables?.id === activeId
     ? (errMessage(connectMutation.error) || i18nT('components.instancesViewport.connection_error'))
     : ''
   const panelError = connectFailure || activeInst?.status?.error || activeInst?.status?.diagnosis?.reason || ''

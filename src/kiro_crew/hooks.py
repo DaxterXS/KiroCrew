@@ -61,6 +61,8 @@ from kiro_crew.platform.tool_paths import (  # noqa: F401  (re-exported for call
     _TARGET_PATH_MAX_PATHS,
     TARGET_PATH_KEYS,
     TargetPaths,
+    edit_target_candidates,
+    is_edit_call,
     target_paths,
 )
 from kiro_crew.security import (
@@ -144,6 +146,18 @@ class ToolHookResult:
     #: and deny-by-default-shell messages do not), so matching on it would
     #: classify a sensitive-path or exfiltration deny as non-security.
     security_deny: bool = True
+    #: True when a TOOL_AUTO_APPROVE was decided by the call's VERIFIED MCP
+    #: identity (``_meta.kiro`` server + tool, read from the client's own
+    #: tool_call cache) and by nothing the agent authors -- the app-own-server
+    #: grant, or an ``auto_approve_tools`` pattern matched against that
+    #: identity. False for every grant that read the title, the payload's
+    #: ``kind``, or a command. A consumer holding a backend-subagent request
+    #: whose ARGUMENTS are unverified but whose identity is
+    #: (``AcpEvent.child_mcp_identity_trusted``) may honor exactly these grants:
+    #: their matched input is the same trusted identity, so a forged title
+    #: cannot reach them. Any other auto-approve stays downgraded for that
+    #: request, as before.
+    identity_grant: bool = False
 
     @staticmethod
     def _count(action: str, security_deny: bool) -> None:
@@ -184,9 +198,9 @@ class ToolHookResult:
         return ToolHookResult(action=TOOL_ALLOW)
 
     @staticmethod
-    def auto_approve() -> ToolHookResult:
+    def auto_approve(*, identity_grant: bool = False) -> ToolHookResult:
         ToolHookResult._count(TOOL_AUTO_APPROVE, False)
-        return ToolHookResult(action=TOOL_AUTO_APPROVE)
+        return ToolHookResult(action=TOOL_AUTO_APPROVE, identity_grant=identity_grant)
 
     @staticmethod
     def deny(reason: str) -> ToolHookResult:
@@ -558,10 +572,12 @@ class HookManager:
         app: str = "",
         tool_kind: str = "",
         raw_params: dict | None = None,
+        diff_path: str = "",
         command: str | None = None,
         is_shell: bool = False,
         mcp_server_name: str = "",
         mcp_tool_name: str = "",
+        mcp_identity_trusted: bool = False,
         resolved_agent: str = "",
     ) -> ToolHookResult:
         """Check if a tool should be auto-approved, denied, or handled normally.
@@ -595,6 +611,24 @@ class HookManager:
         tiers a synthesized ``file-search …`` target (``_search_deny_target``) for a
         search-shaped call, whose walked root and depth cap exist ONLY in its
         arguments; a caller that omits ``raw_params`` loses that coverage too.
+
+        ``diff_path`` is the path the tool call's ``{"type": "diff"}`` content
+        block named (``event.diff_path``, cached by ``acp._dispatch`` per scoped
+        toolCallId). A nonempty ``diff_path`` is itself write-plane evidence —
+        the cache is written only when a tool_call frame declares a file
+        change — so the write-protected tier judges any call carrying one (or
+        declaring the ``edit`` kind) by the UNION of the params' path
+        spellings and this path, and denies an empty union: a backend may
+        stream params that carry no path key and name the file only in that
+        block, so the params alone can judge nothing
+        (mirroring ``llm_helpers._edit_target_denial``). Defaults to
+        ``""``: a caller that does not thread it keeps params-only judgement of
+        edits, and an edit-kind call that carries params (any dict, ``{}``
+        included) or a diff block but names no path is denied rather than
+        passed unjudged. Only ``raw_params=None`` with no ``diff_path`` falls
+        through — such an edit has nothing to judge here and keeps the other
+        tiers' coverage, exactly like ``_edit_target_denial``, which an edit
+        with no params never reaches.
 
         ``is_shell`` enforces deny-by-default for shell tools: when a caller
         reports a shell tool (``is_shell=True``) but cannot supply the raw
@@ -770,22 +804,66 @@ class HookManager:
         # ``cp``-dest) are not matched on command text; the OS sandbox is the
         # shell-side control, and this branch covers the file-EDIT tool.
         #
-        # Empty/unknown ``tool_kind`` (the ACP kind field is spec-optional; some
-        # backends omit it) is DELIBERATELY not mirrored here.
+        # The branch routes on ``is_edit_call``: the ``edit`` kind, OR a diff
+        # content block naming a path — the diff block is the edit's target of
+        # record, and only a call declaring a file change carries one, so its
+        # PRESENCE is write-plane evidence however the spec-optional ``kind``
+        # field arrived (empty, or even ``read``). The read allowance below is
+        # keyed on the ABSENCE of a diff block, not on the kind: a kindless
+        # call WITHOUT one stays a read, because
         # ``governance._scopes_for_call`` (platform/governance.py) infers BOTH
-        # filesystem.read AND filesystem.write from a lone ``path`` when the kind
-        # is empty, because it is a *policy intersection* where an ungoverned
-        # scope permits. This gate is a HARD deny, so applying that same shape
-        # inference would also block legitimate config READS that arrive without a
-        # kind — regressing the read-allowance that is the whole point of the
-        # write-only tier. Empty-kind edits are rare (the ACP fs_write tool sets
-        # ``edit``); not hard-denying them keeps the two write-gates from drifting
-        # into a read regression, and the OS sandbox covers the shell surface.
-        if tool_kind == _EDIT_TOOL_KIND and raw_params:
+        # filesystem.read AND filesystem.write from a lone ``path`` when the
+        # kind is empty as a *policy intersection* where an ungoverned scope
+        # permits, while this gate is a HARD deny — applying that shape
+        # inference to diff-less calls would block legitimate config READS,
+        # regressing the read-allowance that is the whole point of the
+        # write-only tier. The OS sandbox covers the shell surface.
+        if is_edit_call(tool_kind, diff_path) and (raw_params is not None or diff_path):
             # Same spelling coverage as the sensitive-path keystone above, for the
             # same reason: the write-protected tier is worthless if a config edit
-            # can name its target under a key the check never reads.
-            for wpath in target_paths(raw_params):
+            # can name its target under a key the check never reads. The judged
+            # set is the UNION of the params' path spellings and the diff content
+            # block's path, computed by the SAME helper the always-enforced tier
+            # uses (``edit_target_candidates``): a backend may stream params that
+            # carry no path key at all and name the file only in that block, so
+            # the params alone can judge nothing.
+            candidates = edit_target_candidates(raw_params, diff_path)
+            if candidates.truncated:
+                # Unreachable while the keystone above denies a truncated walk
+                # first, but this branch keeps its own fail-closed reading so a
+                # reorder above cannot silently turn a partial scan into a pass.
+                return ToolHookResult.deny(
+                    "Blocked: tool arguments too large to verify for sensitive "
+                    "paths (deny-by-default)"
+                )
+            if candidates.unanchored:
+                # The diff block's path is a verbatim backend field. A relative
+                # one resolves against the gateway process CWD, not the agent
+                # workspace, so a workspace symlink can point it at a protected
+                # file no gate would recognize under its unanchored spelling —
+                # deny as unverifiable, same fail-closed shape as truncation.
+                return ToolHookResult.deny(
+                    "Blocked: file edit names a relative target path that "
+                    "cannot be verified (deny-by-default)"
+                )
+            if not candidates:
+                # Mirrored from the always-enforced tier: a declared file edit
+                # whose params and content block together name no target has no
+                # proven target to judge — deny rather than approve blind.
+                # ``raw_params={}`` takes this deny too (the branch enters on
+                # ``is not None``, not truthiness), matching
+                # ``_edit_target_denial``, which selects ANY dict via
+                # ``isinstance`` and denies its empty union — a falsy-guard
+                # skip here would be the fail-open the two-gate parity exists
+                # to prevent. Scoped to the edit kind: the empty/unknown
+                # ``tool_kind`` case above stays a read allowance, and an edit
+                # event carrying ``raw_params=None`` and no diff block never
+                # enters this branch (matching ``_edit_target_denial``, which
+                # such an edit never reaches either).
+                return ToolHookResult.deny(
+                    "Blocked: file edit names no target path to verify (deny-by-default)"
+                )
+            for wpath in candidates:
                 if is_sensitive_write_path(wpath):
                     return ToolHookResult.deny(
                         f"Blocked: modification of write-protected config path: {wpath}"
@@ -873,6 +951,25 @@ class HookManager:
             )
             if reason:
                 return ToolHookResult.deny(reason)
+        # The user's own ``auto_deny_tools`` GLOBS, and only those, are also
+        # matched against the identity in the ``@server/tool`` spelling the
+        # approve loop below uses (plus ``Running: @server/tool`` and the bare
+        # ``@server``, so a server-level rule binds to every tool). A user who
+        # writes both lists in one spelling -- ``auto_approve_tools:
+        # ["@ops/*"]``, ``auto_deny_tools: ["@ops/delete_*"]`` -- otherwise gets
+        # an approve keyed on the verified identity while the deny rides the
+        # forgeable title, and a benign title over a denied tool auto-fires.
+        # Kept OUT of ``deny_targets`` above on purpose: the shipped regex rules
+        # are authored against shell text, and running them over a synthesized
+        # reference is the accidental widening the note above forbids. Not
+        # gated on provenance: a deny can only ever deny.
+        if mcp_server_name and self._config.auto_deny_tools:
+            _tool_ref = mcp_identity_ref(mcp_server_name, mcp_tool_name)
+            for _ref in (_tool_ref, f"Running: {_tool_ref}", mcp_identity_ref(mcp_server_name, "")):
+                if _ref and any(
+                    _tool_matches(pattern, _ref) for pattern in self._config.auto_deny_tools
+                ):
+                    return ToolHookResult.deny(f"Blocked by security policy: {_ref}")
 
         # A file-search builtin's scope lives only in its arguments -- it carries no
         # ``command``, and its title need not name the root it walks -- so this target is
@@ -942,6 +1039,7 @@ class HookManager:
             app,
             tool_kind,
             raw_params,
+            diff_path=diff_path,
             mcp_ref=governance_mcp_ref,
             extra_titles=(mcp_tool_name,) if mcp_tool_name and mcp_tool_name != tool_name else (),
         )
@@ -1027,19 +1125,59 @@ class HookManager:
             # server alone. Fall through to interactive approval (fail-closed),
             # never silent execute.
             if canonical_mcp_name:
-                return ToolHookResult.auto_approve()
+                return ToolHookResult.auto_approve(identity_grant=mcp_identity_trusted)
 
         # Auto-approve — match against both the original title (preserves
         # "Running: "/"Reading " prefixes) and the normalized name (stripped)
         # so that "Running: *" and bare tool-name patterns both work.
         #
-        # This loop matches only the TITLE, which the agent authors — safe here
+        # This loop matches the TITLE, which the agent authors — safe here
         # ONLY because a shell call whose command could not be recovered was
         # already hard-denied above, so no unverified command can reach it. Do not
         # weaken that refusal without also gating this loop.
+        #
+        # For an MCP-served call whose canonical identity is VERIFIED — both
+        # ``_meta.kiro`` fields present AND the caller's ``mcp_identity_trusted``
+        # provenance flag set (the event's own flag, earned only when the
+        # identity came from the client's tool_call cache; non-emptiness alone
+        # is not provenance, see ``AcpEvent.mcp_identity_trusted``) — the
+        # pattern is matched against THAT identity, in place of the title. A
+        # grant keyed on the title would let a model-authored ``description``
+        # that reads like an allowed tool approve a different one; keyed on the
+        # identity, the pattern approves exactly the tool that executes. Two
+        # spellings of the same identity: kiro-cli's own title form
+        # ``Running: @server/tool`` and the governance reference
+        # ``@server/tool`` (``mcp_identity_ref``). The wire form
+        # ``mcp__server__tool`` is deliberately NOT a grant target: a server
+        # or tool name may itself contain ``__``, so two different verified
+        # identities can share one wire spelling, and a grant written against
+        # it would approve the other tool. The deny list may accept that form
+        # (over-denying is safe); a grant may not. An identity that is present
+        # but unproven falls back to the title branch, exactly as before.
+        _identity_ref = (
+            mcp_identity_ref(mcp_server_name, mcp_tool_name)
+            if mcp_server_name and mcp_tool_name and mcp_identity_trusted
+            else ""
+        )
+        grant_targets: tuple[str, ...]
+        if _identity_ref:
+            grant_targets = (f"Running: {_identity_ref}", _identity_ref)
+            identity_grant = True
+        else:
+            grant_targets = (tool_name, normalized)
+            identity_grant = False
         for pattern in self._config.auto_approve_tools:
-            if _tool_matches(pattern, tool_name) or _tool_matches(pattern, normalized):
-                return ToolHookResult.auto_approve()
+            if any(_tool_matches(pattern, target) for target in grant_targets):
+                return ToolHookResult.auto_approve(identity_grant=identity_grant)
+        if _identity_ref:
+            # Runtime breadcrumb for the deliberate title-match exclusion: a
+            # pattern that matches the agent-authored title does not grant an
+            # identity-verified MCP call. On an unattended surface the only
+            # other symptom is a card nobody answers, so say once per
+            # (pattern, identity) which rewrite restores the grant.
+            for pattern in self._config.auto_approve_tools:
+                if _tool_matches(pattern, tool_name) or _tool_matches(pattern, normalized):
+                    _note_title_only_grant_pattern(pattern, _identity_ref)
 
         # KiroCrew-side read-only auto-approve — the LAST branch before allow(),
         # AFTER every early-return deny (deny-by-default shell, sensitive-path,
@@ -1312,6 +1450,7 @@ def _governance_denial(
     app: str,
     tool_kind: str = "",
     raw_params: dict | None = None,
+    diff_path: str = "",
     mcp_ref: str = "",
     extra_titles: tuple[str, ...] = (),
 ) -> str | None:
@@ -1322,6 +1461,11 @@ def _governance_denial(
     display title. It is passed as a reference rather than folded into
     *tool_name* because the title grammar cannot encode every identity; both are
     empty for a non-MCP call with no title, which governs nothing.
+
+    *diff_path* is the diff content block's path for an edit-kind call; it joins
+    the ``filesystem.write`` target set the gate classifies
+    (``classify_tool_args``), so a diff-only edit is judged against an
+    ALLOW-mode write confinement rather than reaching it pathless.
 
     Resolves the active profile (Level 2) for the calling surface and intersects
     it with the boot-frozen ceiling (Level 1).  Fast no-op when the host has
@@ -1351,6 +1495,7 @@ def _governance_denial(
             tool_name,
             tool_kind=tool_kind,
             raw_params=raw_params,
+            diff_path=diff_path,
             mcp_ref=mcp_ref,
             extra_titles=extra_titles,
         )
@@ -1889,6 +2034,61 @@ def _search_deny_target(raw_params: dict | None) -> str:
     return " ".join(fields)
 
 
+#: (pattern, identity) pairs already reported by ``_note_title_only_grant_pattern``,
+#: bounded so a misconfigured pattern over a long session cannot grow it without limit.
+_TITLE_ONLY_GRANT_NOTED: set[tuple[str, str]] = set()
+_TITLE_ONLY_GRANT_NOTED_CAP = 512
+
+
+def _note_title_only_grant_pattern(pattern: str, identity_ref: str) -> None:
+    """Log once that an ``auto_approve_tools`` pattern matches only the title.
+
+    For an MCP call with a verified identity the grant is keyed on
+    ``@server/tool``, so a pattern written against the agent-authored title
+    (a ``description``, or a title that does not spell the identity) stops
+    granting. The visible symptom is an approval card, which on an unattended
+    surface nobody answers; this line is the breadcrumb that connects the card
+    to the pattern and names the rewrite.
+    """
+    key = (pattern, identity_ref)
+    if key in _TITLE_ONLY_GRANT_NOTED:
+        return
+    if len(_TITLE_ONLY_GRANT_NOTED) >= _TITLE_ONLY_GRANT_NOTED_CAP:
+        _TITLE_ONLY_GRANT_NOTED.clear()
+    _TITLE_ONLY_GRANT_NOTED.add(key)
+    logger.warning(
+        "auto_approve_tools pattern %r matches this call's title but not its verified MCP "
+        "identity %s; for an MCP call the grant is keyed on the identity, so the call falls "
+        "to interactive approval. Rewrite the pattern as %r (or 'Running: %s').",
+        pattern,
+        identity_ref,
+        identity_ref,
+        identity_ref,
+    )
+
+
+def identity_grant_covers_child(result: ToolHookResult, event: object) -> bool:
+    """True when a hook auto-approve may stand for a LOW-FIDELITY child request.
+
+    A backend-subagent permission event whose arguments are unverified is
+    normally downgraded past every hook auto-approve, because those grants read
+    the agent-authored title. The one exception is a grant the hook decided by
+    the call's VERIFIED MCP identity (``ToolHookResult.identity_grant``) for an
+    event whose own identity verified (``AcpEvent.child_mcp_identity_trusted``):
+    both sides of that match are the same ``_meta.kiro`` server/tool pair the
+    client cached from the tool_call frame, so nothing the agent authors
+    reaches the decision. It is also the user's NARROW grant — they allowed
+    this tool — where session trust-all or YOLO would allow every tool the
+    child calls. The dashboard runner and the subagent manager both consult
+    this so the two consumers cannot drift on the rule.
+    """
+    return bool(
+        result.action == TOOL_AUTO_APPROVE
+        and result.identity_grant
+        and getattr(event, "child_mcp_identity_trusted", False)
+    )
+
+
 def _normalize_tool_name(tool_name: str) -> str:
     """Strip display prefixes so hook patterns match the actual tool/command name."""
     for prefix in _TOOL_TITLE_PREFIXES:
@@ -2204,9 +2404,12 @@ def safe_read_file(path: str) -> str:
 
     Canonicalizes the path (following every symlink), re-checks the RESOLVED
     target against ``is_sensitive_path`` — so a symlink pointing into ``~/.aws``
-    etc. is refused through the link — then opens the canonical path with
-    ``O_NOFOLLOW`` as defense-in-depth against a TOCTOU swap of the final
-    component into a symlink after the check.  Opening the
+    etc. is refused through the link — then re-opens the canonical path through
+    :func:`kiro_crew.platform_compat.open_file_no_reparse` as defense-in-depth
+    against a TOCTOU swap of the final component into a link after the check.
+    That helper carries the refusal on Windows too, where ``O_NOFOLLOW`` does not
+    exist and a plain open would resolve a junction planted at the name.
+    Opening the
     already-resolved canonical path never rejects a legitimate file (its final
     component is not a symlink by construction), so this only closes the race.
 
@@ -2222,7 +2425,7 @@ def safe_read_file(path: str) -> str:
         # would forge a second record.
         raise PermissionError(f"Blocked: access to sensitive path: {resolved!r}")
     try:
-        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(resolved)
     except OSError as exc:
         # ELOOP on the canonical (symlink-free) path means a concurrent TOCTOU
         # swap of the final component into a symlink — refuse it. Any other
@@ -2246,9 +2449,10 @@ def safe_read_file_bytes(raw: str) -> bytes | None:
 
     ``validate_file_path`` already canonicalizes via ``realpath`` (following
     symlinks) and rejects sensitive resolved targets, so a workspace symlink
-    into ``~/.aws`` etc. is refused before any read.  The final open uses
-    ``O_NOFOLLOW`` on the canonical path as defense-in-depth against a TOCTOU
-    swap of the final component into a symlink after the check.
+    into ``~/.aws`` etc. is refused before any read.  The final open goes through
+    :func:`kiro_crew.platform_compat.open_file_no_reparse` as defense-in-depth
+    against a TOCTOU swap of the final component into a link after the check —
+    a refusal that holds on Windows as well, where ``O_NOFOLLOW`` does not exist.
 
     Returns file content as bytes, or None if path is rejected or unreadable.
     """
@@ -2257,7 +2461,7 @@ def safe_read_file_bytes(raw: str) -> bytes | None:
         return None
 
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(path)
     except OSError:
         return None
     try:
@@ -2277,7 +2481,9 @@ def safe_read_file_bytes_with_identity(
 
     Like :func:`safe_read_file_bytes`, but closes the authorize-then-read TOCTOU
     window for callers that keep a filesystem allowlist. The file is opened ONCE
-    with ``O_NOFOLLOW`` and the ``fstat`` identity ``(st_dev, st_ino)`` of that
+    through :func:`kiro_crew.platform_compat.open_file_no_reparse`, which refuses a
+    link at the final component on every platform, and the ``fstat`` identity
+    ``(st_dev, st_ino)`` of that
     very descriptor MUST be in ``allowed_identities`` before any bytes are
     returned. Because authorization and read share one descriptor, a symlink- or
     directory-swap slipped in between ``realpath`` and ``open`` cannot substitute
@@ -2286,8 +2492,8 @@ def safe_read_file_bytes_with_identity(
     all filesystem reads stay funnelled through this centralized chokepoint.
 
     Returns bytes on success. Raises :class:`PermissionError` when the opened
-    inode is not allowlisted or a final-component symlink swap is detected
-    (``O_NOFOLLOW`` → ``ELOOP``), and :class:`FileTooLargeError` when the file
+    inode is not allowlisted or a final-component link swap is detected
+    (reported as ``ELOOP``), and :class:`FileTooLargeError` when the file
     exceeds ``MAX_FILE_BYTES``. Returns ``None`` when the path is rejected by
     :func:`validate_file_path` or is otherwise unreadable.
     """
@@ -2296,7 +2502,7 @@ def safe_read_file_bytes_with_identity(
         return None
 
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(path)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, getattr(errno, "EMLINK", -1)):
             raise PermissionError(f"Blocked: refusing to follow symlink at {path!r}") from exc
@@ -2349,18 +2555,29 @@ def safe_read_file_bytes_nolink(
     A caller that lstat()s the path and then opens it by name leaves a race
     window where the file is swapped for a hardlink to a sensitive file
     (e.g. ``~/.aws/config``) between the check and the open. Here the open
-    happens first (``O_NOFOLLOW``), then ``fstat()`` on the descriptor —
+    happens first, refusing a link at the final component, then ``fstat()`` on
+    the descriptor —
     the inode that is validated is exactly the inode that is read:
     ``st_nlink > 1`` or a non-regular file type is rejected.
 
     When ``within_root`` is given, the OPENED descriptor's real path
     (via ``/proc/self/fd`` on Linux, ``fcntl.F_GETPATH`` on macOS, or
     ``GetFinalPathNameByHandleW`` on Windows) must resolve inside that root and
-    must not be sensitive. ``O_NOFOLLOW`` only guards the
+    must not be sensitive. Refusing the link only guards the
     FINAL path component — a nested directory swapped for a symlink between
     the tree walk and the open would silently escape the approved tree. The
     fd-path check is pinned to the inode actually opened, so no check-to-use
     window remains. If the fd's real path cannot be determined, fail closed.
+
+    That final-component refusal comes from
+    :func:`kiro_crew.platform_compat.open_file_no_reparse`, not from an
+    ``O_NOFOLLOW`` flag, because the flag does not exist on Windows:
+    ``getattr(os, "O_NOFOLLOW", 0)`` is ``0`` there, so a plain ``os.open``
+    resolves a junction at the name and this chokepoint would hold one fewer
+    guarantee on one platform than the paragraph above claims. ``CreateFileW``
+    with ``FILE_FLAG_OPEN_REPARSE_POINT`` opens the reparse point AS ITSELF and
+    the helper reports ``ELOOP``, which is what POSIX reports for the same
+    shape, so the open is one operation with one contract everywhere.
 
     Returns file content as bytes, or None if the path is rejected,
     hardlinked, non-regular, escaping ``within_root``, or unreadable.
@@ -2377,7 +2594,7 @@ def safe_read_file_bytes_nolink(
         return None
 
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(path)
     except OSError:
         return None
     try:
@@ -2930,22 +3147,30 @@ def safe_copy_file_nolink(raw: str, dest_dir: str) -> str | None:
     freshly created 0600 temp file inside *dest_dir*, so downstream readers
     never touch the caller-influenced original path again.
 
-    Validation mirrors :func:`safe_read_file_bytes_nolink`: open first
-    (``O_NOFOLLOW``), then ``fstat()`` on the descriptor (regular file,
+    Validation mirrors :func:`safe_read_file_bytes_nolink`: open first, refusing a
+    link at the final component, then ``fstat()`` on the descriptor (regular file,
     ``st_nlink == 1``), then the OPENED descriptor's real path (via
-    ``/proc/self/fd`` on Linux, ``fcntl.F_GETPATH`` on macOS) must not be
-    sensitive. ``O_NOFOLLOW`` only guards the FINAL path component — an
-    ancestor directory swapped for a symlink between validation and open
-    would otherwise reach a sensitive file. The fd-path check is pinned to
-    the inode actually opened and copied, so no check-to-use window remains.
-    If the fd's real path cannot be determined, fail closed.
+    ``/proc/self/fd`` on Linux, ``fcntl.F_GETPATH`` on macOS,
+    ``GetFinalPathNameByHandleW`` on Windows) must not be sensitive. Refusing the
+    link only guards the FINAL path component — an ancestor directory swapped for a
+    symlink between validation and open would otherwise reach a sensitive file. The
+    fd-path check is pinned to the inode actually opened and copied, so no
+    check-to-use window remains. If the fd's real path cannot be determined, fail
+    closed.
+
+    The open goes through :func:`kiro_crew.platform_compat.open_file_no_reparse`
+    because this function copies BYTES with a raw ``os.read``, and both halves of
+    that matter on Windows: ``O_NOFOLLOW`` does not exist there, so a plain
+    ``os.open`` follows a reparse point at the name AND hands back a CRT descriptor
+    in text mode, which truncates a binary payload at its first ``0x1A``. Media
+    files — what this function exists for — are exactly the payloads that carry one.
     """
     path = validate_file_path(raw)
     if path is None:
         return None
 
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(path)
     except OSError:
         return None
     tmp_fd = -1
@@ -2998,8 +3223,10 @@ def safe_read_prefix(raw: str, n: int) -> bytes | None:
     ``MAX_FILE_BYTES`` (e.g. the ~100 MB kiro-cli binary). ``validate_file_path``
     canonicalizes via ``realpath`` (following symlinks) and rejects sensitive
     resolved targets, so a symlink pointing into ``~/.aws`` etc. is refused
-    before any read. The open uses ``O_NOFOLLOW`` on the canonical path as
-    TOCTOU defense against a final-component symlink swap after the check.
+    before any read. The open goes through
+    :func:`kiro_crew.platform_compat.open_file_no_reparse` as TOCTOU defense
+    against a final-component link swap after the check — a refusal that holds on
+    Windows too, where ``O_NOFOLLOW`` does not exist.
 
     Returns up to *n* bytes, or None if the path is rejected or unreadable.
     """
@@ -3009,7 +3236,7 @@ def safe_read_prefix(raw: str, n: int) -> bytes | None:
     if path is None:
         return None
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(path)
     except OSError:
         return None
     try:
@@ -3156,20 +3383,22 @@ def safe_read_file_internal(read_id: str) -> bytes | None:
             f"non-sensitive path; allowlist is only valid for sensitive paths",
         )
 
-    # Open with O_NOFOLLOW so a symlink at the final path component (e.g. a
-    # planted ~/.aws/sso/cache/kiro-auth-token-cli.json -> attacker file) is
-    # refused, binding the read to the real allowlisted file rather than a
-    # redirected target. Check + read share ONE descriptor (TOCTOU-safe), and
-    # fstat confirms a regular file before reading.
+    # Open so a link at the final path component (e.g. a planted
+    # ~/.aws/sso/cache/kiro-auth-token-cli.json -> attacker file) is refused,
+    # binding the read to the real allowlisted file rather than a redirected
+    # target. platform_compat.open_file_no_reparse carries that refusal on Windows
+    # as well, where O_NOFOLLOW does not exist and a plain os.open would resolve a
+    # junction planted at the name. Check + read share ONE descriptor
+    # (TOCTOU-safe), and fstat confirms a regular file before reading.
     import stat
 
     try:
-        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = platform_compat.open_file_no_reparse(resolved)
     except FileNotFoundError:
         _emit_internal_read_audit(read_id, "missing")
         return None
     except OSError:
-        # ELOOP (final component is a symlink) and any other open error —
+        # ELOOP (final component is a link) and any other open error —
         # fail closed, never following the link.
         _emit_internal_read_audit(read_id, "unreadable")
         return None
