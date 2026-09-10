@@ -121,6 +121,27 @@ _CRON_CRED_PATH_RE = re.compile(
     r"(?:/|\s|['\"]|$)",
     re.IGNORECASE,
 )
+# SSH private-key FILENAMES, matched as a whole token wherever they appear.
+# _CRON_CRED_PATH_RE above matches sensitive DIRECTORY names, so it catches
+# `cat ~/.ssh/id_rsa` and misses `find ~ -name id_rsa -exec cat {} \;`, which
+# never spells `.ssh` at all. That gap is reachable because `cc` deliberately
+# leaves `~/.ssh` READABLE so ssh/git/scp crons work (only `strict` hides it,
+# and SSH_AUTH_SOCK is scrubbed from the cron env, so there is no agent
+# alternative) -- see the accepted-residual comment in
+# `cron_script.run_command_sandboxed`.
+#
+# This closes ONLY the by-filename spelling. It is NOT a fence: a recursive
+# reader that names neither the directory nor the file (`grep -r 'PRIVATE KEY'
+# ~`, `tar czf - ~`) and any interpreter composing the path at run time still
+# reach the key. The stdout redaction in `run_command_sandboxed` covers a
+# direct dump of one; the remaining runtime residual is documented there.
+_CRON_SSH_KEY_BASENAME_RE = re.compile(
+    r"(?:^|[\s'\"=@/])"
+    r"(?:id_rsa|id_dsa|id_ecdsa_sk|id_ecdsa|id_ed25519_sk|id_ed25519)"
+    r"(?:\.pub)?"
+    r"(?:$|[\s'\"/])",
+    re.IGNORECASE,
+)
 # Protected secret env vars a cron command must not read by name. Union of the
 # sandbox-scrubbed agent keys (Slack tokens, owner id) and well-known cloud /
 # source-control credential env vars. The sandbox strips _AGENT_DENIED_ENV_KEYS
@@ -759,6 +780,12 @@ def _vet_shell_command(command: str) -> str | None:
                 "Error: cron command blocked: references a credential path "
                 "(e.g. .aws/.ssh/.netrc). Cron commands may not read credential "
                 "files directly."
+            )
+        if _CRON_SSH_KEY_BASENAME_RE.search(variant):
+            return (
+                "Error: cron command blocked: names an SSH private key file "
+                "(id_rsa, id_ed25519, ...). Cron commands may not read key "
+                "files; let ssh/git find the key through ~/.ssh/config instead."
             )
     if _CRON_SECRET_ENV_RE.search(command):
         return "Error: cron command blocked: references a protected secret environment variable"
