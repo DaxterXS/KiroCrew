@@ -28,6 +28,7 @@ const {
   OWNER,
 } = require("./browser-control");
 const { createBrowserOps } = require("./browser-ops");
+const { runAnnotateOp } = require("./browser-annotate");
 const { createAgentCommandChannel } = require("./browser-agent-channel");
 const { attachContextMenu } = require("./context-menu");
 const { validateRemoteSettings } = require("./validation");
@@ -1861,6 +1862,36 @@ function createWindowLifecycle(options) {
     return dispatchBrowserOp(panel, op, args);
   }
 
+  // Human-initiated element annotation on the page the user is looking at.
+  // Served through executeJavaScript/capturePage, never the agent control
+  // plane: it needs no CDP owner and Browser Mode may be off. Closed op set.
+  async function browserAnnotate(sender, panelId, op, args) {
+    const panel = panelForSender(sender, panelId, { create: false });
+    if (!panel) return { ok: false, code: "no_view", error: "no native browser panel" };
+    const res = await runAnnotateOp(panel.manager.getWebContents(), op, args);
+    // The click that picked an element (or a marker) landed in the native
+    // view, so keyboard focus is there. The note is typed in the PANEL -- hand
+    // focus back to the dashboard renderer so its editor can take it without
+    // a second click. Poll-only, one-shot (the flags are cleared on read).
+    // The page owns the reply, so the id must name a pick the sanitizer kept,
+    // and focus moves at most once a second: a hostile page re-reporting
+    // `picked` every poll must not pin keyboard focus to the dashboard.
+    if (op === "poll" && res && res.ok && (res.picked !== undefined || res.edit !== undefined)) {
+      const id = res.picked !== undefined ? res.picked : res.edit;
+      const known = Array.isArray(res.items) && res.items.some((it) => it && it.id === id);
+      const now = Date.now();
+      if (known && now - (panel.lastAnnotateFocus || 0) >= 1000) {
+        panel.lastAnnotateFocus = now;
+        try {
+          if (sender && !sender.isDestroyed()) sender.focus();
+        } catch {
+          // Focus is a courtesy; the editor still works after a click.
+        }
+      }
+    }
+    return res;
+  }
+
   function recordMemorySample(sender, payload) {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (sender !== mainWindow.webContents) return;
@@ -1942,6 +1973,7 @@ function createWindowLifecycle(options) {
       setControlOwner: browserSetControlOwner,
       getControl: browserGetControl,
       control: browserControl,
+      annotate: browserAnnotate,
     },
     security: {
       configureSession: configureSessionSecurity,
