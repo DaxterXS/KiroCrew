@@ -1387,6 +1387,11 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
             kwargs["agent_id"] = agent_val
         if getattr(args, "approval_mode", None) is not None:
             kwargs["approval_mode"] = "" if args.approval_mode == "default" else args.approval_mode
+        # OPERATOR-ONLY: the CLI is a human surface, so it may widen a script
+        # job's sandbox. The MCP cron tools cannot -- see cli.py's --sandbox
+        # comment and CronJob.sandbox.
+        if getattr(args, "sandbox", None) is not None:
+            kwargs["sandbox"] = args.sandbox
         if not kwargs:
             print("Provide at least one field to update")
             return

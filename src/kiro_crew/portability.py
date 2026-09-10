@@ -665,6 +665,17 @@ def _sanitize_imported_crons(crons_path: Path) -> tuple[list[str], list[str]]:
                 "Error: an imported job that runs a command or script is "
                 "restored paused until it is enabled by hand",
             )
+
+        # Rule 4: an import is not an upgrade. The loader reads a MISSING
+        # "sandbox" key on a script record as "written before the cc default"
+        # and grandfathers it to the wide `standard` profile -- correct for this
+        # host's own pre-upgrade store, wrong for a record arriving from
+        # somewhere else, which would get the wide sandbox with nobody having
+        # asked for it. Stamp the default so only a genuinely local pre-upgrade
+        # record can claim the grandfather.
+        if script and "sandbox" not in job:
+            job["sandbox"] = ""
+            changed = True
         kept.append(job)
 
     if changed:

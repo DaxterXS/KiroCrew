@@ -1510,6 +1510,7 @@ def run_script_sandboxed(
     secret_env: dict[str, str] | None = None,
     secret_env_pin: str = "",
     delivery: str = "",
+    sandbox: str = "",
 ) -> dict:
     """Run a cron script in a sandboxed subprocess via wrap_argv().
 
@@ -1526,6 +1527,14 @@ def run_script_sandboxed(
     sibling module the operator did not approve fails the import instead of
     running with the secrets. A script that needs siblings must inline them
     (one approved body) or read them as data.
+
+    ``sandbox`` is the job's stored profile (``cron.CronJob.sandbox``) and
+    decides the UNGRANTED case only: ``"standard"`` keeps the wide view, and
+    anything else -- including the default ``""`` -- runs ``cc``, where the
+    credential stores are hidden. A granted run always overrides it with
+    ``strict``: the operator approved secrets for one body, so the child's
+    reachable surface is made as small as the sandbox can make it regardless of
+    what the job field says. Only an operator surface can write ``"standard"``.
     """
 
     file_path_str, func_name = resolve_script_path(script_path)
@@ -1712,7 +1721,7 @@ def run_script_sandboxed(
         # the script does to sys.path. Granted runs additionally use the
         # STRICT sandbox profile (credential stores and every crew-internal
         # dir hidden), keeping the child's reachable surface as small as the
-        # sandbox can make it. Ungranted scripts keep their normal view.
+        # sandbox can make it.
         if stdin_payload is not None:
             hidden = tuple(
                 dict.fromkeys(
@@ -1724,7 +1733,26 @@ def run_script_sandboxed(
             )
         else:
             hidden = ()
-        sandbox_mode = "strict" if stdin_payload is not None else "standard"
+        # An UNGRANTED script runs cc by default, the same profile a command
+        # job has always used: credential stores hidden (~/.aws except
+        # ~/.aws/config, so credential_process auth still works; ~/.kube,
+        # ~/.gnupg, ~/.netrc, ~/.git-credentials, ~/.npmrc, ~/.pypirc, the
+        # crew .env). This is the RUNTIME control the static body scan in
+        # mcp_cron._vet_script_contents explicitly is NOT: that scan cannot see
+        # through open(a + b), so `standard` as the default left an
+        # agent-written script able to read ~/.aws/credentials with nothing but
+        # a text match -- one it can spell around -- in the way.
+        #
+        # An operator can widen ONE job back to `standard` for a script that
+        # legitimately needs host credentials; the agent cannot, so a
+        # prompt-injected cron_add under an auto-approving session gets cc. A
+        # granted run ignores the field entirely and takes strict.
+        if stdin_payload is not None:
+            sandbox_mode = "strict"
+        elif sandbox == "standard":
+            sandbox_mode = "standard"
+        else:
+            sandbox_mode = "cc"
         sandboxed_argv, sandbox_cleanup = wrap_argv(
             argv, mode=sandbox_mode, extra_hidden_dirs=hidden
         )

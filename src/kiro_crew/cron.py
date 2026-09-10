@@ -312,6 +312,43 @@ _JOB_TIMEOUT_SECS = 1800  # 30 min per job
 _SUBPROC_CLEANUP_ALLOWANCE_SECS = 5
 _TIMER_POLL_SECS = 30  # check for due cron-expr jobs
 _AUTO_PAUSE_THRESHOLD = 5  # consecutive failures before a script/command cron auto-pauses
+
+# Sandbox profile a SCRIPT job's child runs under. Closed enum, validated the
+# way ``approval_mode`` is (a finite-set check at every write boundary), not by
+# the string-length table.
+#
+#   ""         -> the default, and the same runtime profile as "cc"
+#   "cc"       -> credential stores hidden (~/.aws except ~/.aws/config,
+#                 ~/.kube, ~/.gnupg, ~/.netrc, ~/.git-credentials, ~/.npmrc,
+#                 ~/.pypirc, the crew .env); ~/.aws/config stays readable so
+#                 credential_process auth still works
+#   "standard" -> the WIDE profile: those credential stores are readable
+#
+# Two spellings for one runtime meaning is deliberate. Absence of the key on
+# disk is the pre-upgrade signal the grandfather rule in ``_load`` reads, so a
+# NEW job always serializes the field explicitly and "" can never be confused
+# with "this record predates the field". ``_effective_sandbox`` is the single
+# reader that collapses ""/"cc".
+#
+# OPERATOR-ONLY: "standard" is reachable from the dashboard REST PATCH handler
+# and ``kirocrew cron update --sandbox``, never from the MCP ``cron_add`` /
+# ``cron_update`` tools. A prompt-injected agent running under an
+# auto-approving session must not be able to widen the sandbox its own next
+# script runs in -- the same "agent proposes, operator disposes" rule the
+# vault-secret grant flow enforces.
+_CRON_SANDBOX_MODES: tuple[str, ...] = ("", "cc", "standard")
+
+
+def _validate_sandbox_mode(value: object) -> str:
+    """Finite-set gate for the ``sandbox`` field. Returns the accepted value."""
+    if not isinstance(value, str) or value not in _CRON_SANDBOX_MODES:
+        raise ValueError(
+            f"Invalid sandbox: {value!r} (expected one of "
+            f"{', '.join(repr(m) for m in _CRON_SANDBOX_MODES)})"
+        )
+    return value
+
+
 _REAPER_INTERVAL = 60  # seconds between reaper sweeps
 _REAPER_RESET_TIMEOUT = 30.0  # max seconds for session reset in reaper
 
@@ -660,6 +697,16 @@ class CronJob:
     timeout: int = (
         0  # script/command timeout in seconds (0 = use default: 30s script, 300s command)
     )
+    # Sandbox profile for SCRIPT jobs; see _CRON_SANDBOX_MODES. "" and "cc"
+    # both mean the cc profile (credential stores hidden). "standard" widens it
+    # and is settable ONLY from an operator surface -- the dashboard REST PATCH
+    # handler or `kirocrew cron update --sandbox` -- never from the MCP cron
+    # tools, so an agent cannot widen the sandbox its own script runs in. A
+    # record loaded with NO "sandbox" key at all predates this field and is
+    # grandfathered to "standard" by _load, so an upgrade changes no behaviour
+    # for a job that already existed. Ignored for command jobs (they already
+    # run cc) and agent jobs (no subprocess of their own).
+    sandbox: str = ""
     # Operator-approved vault secrets for SCRIPT jobs: env-var name ->
     # vault secret NAME (kiro_crew.secrets.SecretVault; plaintext never touches
     # this store). Minted ONLY by the owner approving an agent request on the
@@ -1429,6 +1476,34 @@ def enabled_count_from_disk(path: Path) -> tuple[int, bool]:
     return (count, loadable)
 
 
+def _record_is_pre_sandbox_script(j: object) -> bool:
+    """True when *j* is a SCRIPT record written before the ``sandbox`` field.
+
+    The signal is the ABSENCE of the key, not a falsy value: every job written
+    since the field landed serializes it explicitly, so ``"sandbox" not in j``
+    means "this record predates the cc default" and nothing else. Only script
+    records are affected -- command jobs already ran cc and agent jobs spawn no
+    script child.
+    """
+    return isinstance(j, dict) and bool(j.get("script")) and "sandbox" not in j
+
+
+def _record_sandbox(j: dict[str, Any]) -> str:
+    """Resolve a record's sandbox profile, grandfathering pre-upgrade scripts.
+
+    A script job written before the field existed ran under the WIDE
+    ``standard`` profile, so an upgrade must not silently narrow what it can
+    read: it loads as ``"standard"`` and :meth:`CronService._load` marks the
+    store dirty so the next write makes that explicit. An unrecognised value on
+    disk resolves to the SAFE default (``""`` -> cc) rather than raising -- the
+    store is hand-editable and one bad value must not drop the whole record.
+    """
+    if _record_is_pre_sandbox_script(j):
+        return "standard"
+    raw = j.get("sandbox", "")
+    return raw if isinstance(raw, str) and raw in _CRON_SANDBOX_MODES else ""
+
+
 def _job_from_record(j: dict[str, Any]) -> CronJob:
     """Build one :class:`CronJob` from its serialized record.
 
@@ -1508,6 +1583,7 @@ def _job_from_record(j: dict[str, Any]) -> CronJob:
         script=j.get("script", ""),
         command=j.get("command", ""),
         timeout=j.get("timeout", 0),
+        sandbox=_record_sandbox(j),
         secret_env=j.get("secret_env", {}),
         secret_env_pin=j.get("secret_env_pin", ""),
         secret_env_pending=j.get("secret_env_pending", {}),
@@ -1573,6 +1649,13 @@ class CronService:
         # _save consults it so a degraded-to-empty job list is never persisted
         # over a store that still holds records — see _save's refusal.
         self._load_failed: bool = False
+        # Set when _load grandfathered a pre-upgrade script record to the
+        # ``standard`` sandbox: the in-memory job now says something the file
+        # does not, and the next _save is what makes it explicit so the record
+        # stops reading as pre-upgrade. Read-only marker -- _save writes every
+        # field from self._jobs anyway, so nothing has to act on it; it exists
+        # so a caller (and a test) can see that the store owes a write.
+        self._sandbox_grandfathered: bool = False
         self._executing: set[str] = set()  # job IDs currently running
         self._running_tasks: dict[str, asyncio.Task[None]] = {}  # strong refs to prevent GC
         self._job_start_times: dict[str, float] = {}  # job ID → epoch start
@@ -2123,6 +2206,7 @@ class CronService:
         minimal_context: bool = False,
         timeout: int = 0,
         timeout_secs: int = 0,
+        sandbox: str = "",
     ) -> CronJob:
         """Add a new job. Provide one of ``every_secs``, ``at_ts``, or ``cron_expr``.
 
@@ -2182,6 +2266,7 @@ class CronService:
             minimal_context=minimal_context,
             timeout=timeout,
             timeout_secs=timeout_secs,
+            sandbox=sandbox,
         )
         self._persist_add_locked(job)
         self._arm_timer()
@@ -2275,6 +2360,7 @@ class CronService:
         minimal_context: bool = False,
         timeout: int = 0,
         timeout_secs: int = 0,
+        sandbox: str = "",
     ) -> CronJob:
         """Validate inputs and construct the :class:`CronJob` (no I/O, no lock).
 
@@ -2297,6 +2383,7 @@ class CronService:
         valid_approval_modes = ("", "auto")
         if approval_mode not in valid_approval_modes:
             raise ValueError(f"Invalid approval_mode: {approval_mode!r}")
+        _validate_sandbox_mode(sandbox)
         # Table-driven type+length gate for every persisted string field.
         # Runs at the persistence owner so EVERY create path (MCP, apps SDK,
         # dashboard, CLI) shares one check. name and message are required
@@ -2384,6 +2471,7 @@ class CronService:
             minimal_context=minimal_context,
             timeout=timeout,
             timeout_secs=int(timeout_secs) if timeout_secs else _JOB_TIMEOUT_SECS,
+            sandbox=sandbox,
         )
 
     def _persist_add_locked(self, job: CronJob) -> None:
@@ -2429,6 +2517,7 @@ class CronService:
         minimal_context: bool = False,
         timeout: int = 0,
         timeout_secs: int = 0,
+        sandbox: str = "",
     ) -> CronJob:
         """Event-loop-safe :meth:`add_job`: the lock+save runs off the loop.
 
@@ -2476,6 +2565,7 @@ class CronService:
             minimal_context=minimal_context,
             timeout=timeout,
             timeout_secs=timeout_secs,
+            sandbox=sandbox,
         )
         await asyncio.to_thread(self._persist_add_locked, job)
         self._arm_timer()
@@ -2549,6 +2639,13 @@ class CronService:
                     valid_approval_modes = ("", "auto")
                     if kwargs["approval_mode"] not in valid_approval_modes:
                         raise ValueError(f"Invalid approval_mode: {kwargs['approval_mode']!r}")
+                # Same shape as approval_mode: a closed enum, checked
+                # before any mutation so a rejected value cannot strand
+                # earlier field writes on the in-memory job. Reachable only
+                # from operator surfaces -- the MCP cron tools do not accept
+                # the field, and their schema rejects unknown keys outright.
+                if "sandbox" in kwargs:
+                    _validate_sandbox_mode(kwargs["sandbox"])
                 # Validate before any mutations
                 # Table-driven type+length gate for every updatable string
                 # field. Falsy values are intentional no-ops (the assignment
@@ -2704,6 +2801,8 @@ class CronService:
                     job.hide_in_chat = bool(kwargs["hide_in_chat"])
                 if "folder_id" in kwargs:
                     job.folder_id = kwargs["folder_id"] or ""
+                if "sandbox" in kwargs:
+                    job.sandbox = kwargs["sandbox"] or ""
                 if "model" in kwargs:
                     job.model = str(kwargs["model"] or "").strip()
                 if "secret_env" in kwargs and kwargs["secret_env"] is not None:
@@ -4760,6 +4859,7 @@ class CronService:
         and a store repaired between two loads heals itself.
         """
         self._load_failed = False
+        self._sandbox_grandfathered = False
         if not self._path.exists():
             self._jobs = []
             self._reset_fingerprint()
@@ -4809,6 +4909,24 @@ class CronService:
                         entry_id,
                         entry_exc,
                     )
+            # Grandfather: a script record with NO "sandbox" key predates the
+            # cc default and kept the wide ``standard`` profile it has always
+            # run under (_record_sandbox did that above). Mark the store as
+            # owing a write so the next _save spells the value out, and log the
+            # job IDS only -- a cron name or message is user text and belongs
+            # nowhere near a startup log line.
+            grandfathered = [
+                str(j.get("id", "")) for j in records if _record_is_pre_sandbox_script(j)
+            ]
+            if grandfathered:
+                self._sandbox_grandfathered = True
+                logger.info(
+                    "Cron script job(s) %s predate the sandbox field: kept on the "
+                    "'standard' sandbox. New script jobs default to 'cc' (credential "
+                    "stores hidden); switch one with "
+                    "PATCH /api/crons/<id>, or `kirocrew cron update <id> --sandbox cc`.",
+                    ", ".join(grandfathered),
+                )
             self._jobs = jobs
             # Fingerprint from the stat taken BEFORE the read: if a writer
             # replaced the file between our stat and read we may have loaded the
@@ -5018,6 +5136,9 @@ class CronService:
                     "script": j.script,
                     "command": j.command,
                     "timeout": j.timeout,
+                    # Always written, even when "" -- absence of this key is
+                    # the pre-upgrade signal _record_sandbox reads.
+                    "sandbox": j.sandbox,
                     "secret_env": j.secret_env,
                     "secret_env_pin": j.secret_env_pin,
                     "secret_env_pending": j.secret_env_pending,
@@ -5032,6 +5153,9 @@ class CronService:
         from kiro_crew.atomic_write import atomic_write
 
         atomic_write(self._path, json.dumps(data, indent=2))
+        # Every record above carried an explicit "sandbox" key, so nothing on
+        # disk reads as pre-upgrade any more.
+        self._sandbox_grandfathered = False
         # Refresh the (mtime_ns, size) fingerprint so _sync recognizes this as
         # our own write and does not reload it back over the in-memory state.
         self._record_fingerprint()

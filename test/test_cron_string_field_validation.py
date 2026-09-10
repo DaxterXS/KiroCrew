@@ -313,6 +313,9 @@ class TestAntiDrift:
     # - last_posted_hash: set by dedup logic when a Slack post is delivered
     # - last_failure_hash: set by dedup logic when a failure notification fires
     # - approval_mode: validated by a separate finite-set check, not length
+    # - sandbox: same shape as approval_mode -- a closed enum ("" | "cc" |
+    #   "standard") gated by cron._validate_sandbox_mode at both write
+    #   boundaries, so a length cap would say nothing about it
     _RUNTIME_ONLY_FIELDS: frozenset[str] = frozenset(
         {
             "id",
@@ -323,6 +326,7 @@ class TestAntiDrift:
             "last_posted_hash",
             "last_failure_hash",
             "approval_mode",
+            "sandbox",
         }
     )
 

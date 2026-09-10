@@ -1438,6 +1438,7 @@ Examples:
   kirocrew cron add 'c360-check' 'check pipeline' --every 600 --agent customer360-code-agent
   kirocrew cron update <job-id> --approval-mode auto
   kirocrew cron update <job-id> --agent oncall-agent
+  kirocrew cron update <job-id> --sandbox standard   # script job needs host creds
   kirocrew cron remove <job-id>
 """,
         formatter_class=_fmt,
@@ -1503,6 +1504,24 @@ Examples:
         choices=["auto", "default"],
         default=None,
         help='Tool approval mode ("auto" to auto-approve, "default" to reset)',
+    )
+    # OPERATOR-ONLY opt-in. The MCP cron tools do not carry this field: a
+    # prompt-injected agent under an auto-approving session must not be able to
+    # widen the sandbox its own next script runs in. Same rule as the
+    # vault-secret grant -- the agent asks, a human decides. Only `update` gets
+    # the flag: `cron add` cannot create a script job, so a `--sandbox` there
+    # would set a field nothing reads.
+    cron_update.add_argument(
+        "--sandbox",
+        dest="sandbox",
+        choices=["cc", "standard"],
+        default=None,
+        help="Sandbox profile for a SCRIPT job's child. 'cc' (the default for a "
+        "new job) hides credential stores -- ~/.aws/credentials, ~/.kube, "
+        "~/.netrc, ~/.git-credentials -- while keeping ~/.aws/config and "
+        "credential_process auth working. 'standard' is the wider profile that "
+        "leaves those readable; set it only for a script that genuinely needs "
+        "host credentials.",
     )
     cron_rm = cron_sub.add_parser("remove", help="Remove a cron job")
     cron_rm.add_argument("job_id", help="Job ID to remove")

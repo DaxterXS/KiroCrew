@@ -20,6 +20,7 @@ from aiohttp import web
 from kiro_crew import model_registry
 from kiro_crew.config.loader import config_dir
 from kiro_crew.cron import (
+    _CRON_SANDBOX_MODES,
     CronPendingMismatch,
     CronStoreBusy,
     CronStoreUnreadable,
@@ -717,6 +718,14 @@ async def api_cron_update(request: web.Request) -> web.Response:
         "hide_in_chat",
         "minimal_context",
         "folder_id",
+        # OPERATOR-ONLY, and this handler is where that boundary lives. The MCP
+        # cron_add / cron_update tools deliberately do not carry `sandbox` (their
+        # schema rejects any unknown key), because a prompt-injected agent under
+        # an auto-approving session must not be able to widen the sandbox its own
+        # next script runs in -- the same "agent proposes, operator disposes"
+        # rule the vault-secret grant flow enforces. A human calling this
+        # owner-authenticated endpoint is exactly who may make that call.
+        "sandbox",
     ):
         if key in body:
             kwargs[key] = body[key]
@@ -747,6 +756,22 @@ async def api_cron_update(request: web.Request) -> web.Response:
         elif not isinstance(fid, str) or len(fid) > MAX_SHORT_STRING:
             return web.json_response(
                 {"error": "invalid folder_id format", "code": "invalid_folder_id"},
+                status=400,
+            )
+    # sandbox is a closed enum: "" / "cc" (credential stores hidden from a script
+    # child) or "standard" (the wide profile). Checked here as a structured 400 so
+    # the surface answers like its folder_id/model siblings rather than surfacing
+    # the store's bare ValueError; _update_job_locked re-validates regardless.
+    if "sandbox" in kwargs:
+        sb = kwargs["sandbox"]
+        if sb is None:
+            kwargs["sandbox"] = ""
+        elif not isinstance(sb, str) or sb not in _CRON_SANDBOX_MODES:
+            return web.json_response(
+                {
+                    "error": "invalid sandbox (expected 'cc' or 'standard')",
+                    "code": "invalid_sandbox",
+                },
                 status=400,
             )
     # UI sends "agent"; internal kwarg is "agent_id". Accept "agent_id" for scripted callers.
@@ -2419,6 +2444,10 @@ async def api_crons(request: web.Request) -> web.Response:
             # of defaulting the control to off and silently clearing the flag on
             # the next save.
             "minimal_context": j.minimal_context,
+            # Sandbox profile of a script job's child. "" and "cc" are the same
+            # runtime profile; the edit form needs the real stored value or a
+            # save would silently move a job an operator widened back to cc.
+            "sandbox": j.sandbox,
             "folder_id": j.folder_id,
             "last_run_ts": j.last_run_ts,
             "has_result": bool(j.last_result),
