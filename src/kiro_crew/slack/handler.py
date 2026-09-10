@@ -3134,7 +3134,25 @@ async def handle_message(
             return False
         if channel_activation == ACTIVATION_REVIEW:
             return True  # Suppress task cards in review mode
-        return await slack.append_task(channel, stream_ts, task_id, title, status, details=details)
+        # Best-effort, and it MUST NOT raise. ``SlackClient.append_task`` swallows
+        # its own API errors and returns False, but a client that does not (or a
+        # transport that raises before that guard) would send the exception up
+        # through here into the streaming loop. Nothing there catches a non-ACP
+        # error — the four typed ``except`` arms below the loop are all
+        # ``kiro_crew.acp.client`` errors — so it lands in the generic
+        # ``except Exception`` catch-all, which renders the terminal
+        # "🔧 Something went wrong" message and records a session failure. The ACP
+        # turn never died: only this decorative card did, so the run keeps going
+        # and posts the correct, complete reply moments later — the false failure
+        # in issue #9730. Swallow it here (traceback still logged at WARNING for
+        # diagnosis) so a card refusal stays a card refusal.
+        try:
+            return await slack.append_task(
+                channel, stream_ts, task_id, title, status, details=details
+            )
+        except Exception:
+            logger.warning("Slack append_task failed — skipping progress card", exc_info=True)
+            return False
 
     async def _tool_elapsed_updater() -> None:
         """Periodically update the active task card with elapsed time (every 30s)."""
@@ -3209,7 +3227,21 @@ async def handle_message(
         )
         use_slack_stream = stream_ts is not None
         if not use_slack_stream:
-            stream_ts = await slack.post_message(channel, _THINKING, reply_ts)
+            # ``SlackClient.start_stream`` swallows its own errors and returns
+            # None, but the ``chat.update`` fallback below goes through the base
+            # ``post_message``, which raises (``resp["ts"]``) on a Slack refusal.
+            # A raise here escapes the streaming loop while the ACP turn is still
+            # live, lands in the generic ``except Exception`` catch-all below the
+            # loop (the typed arms are all ``kiro_crew.acp.client`` errors), and
+            # renders the terminal "🔧 Something went wrong" message on a run that
+            # is still succeeding — the false failure in issue #9730. Keep it
+            # best-effort: a demoted stream with no placeholder still delivers the
+            # final answer from ``accumulated`` at end of turn.
+            try:
+                stream_ts = await slack.post_message(channel, _THINKING, reply_ts)
+            except Exception:
+                logger.warning("Failed to post chat.update placeholder", exc_info=True)
+                stream_ts = _REVIEW_PLACEHOLDER_TS
         assert stream_ts is not None
 
     task = Task(id=msg_ts)

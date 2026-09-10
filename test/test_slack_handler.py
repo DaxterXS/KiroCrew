@@ -3772,3 +3772,90 @@ class TestPerSessionTrust:
     def test_add_trusted_session_empty_key_is_noop(self):
         add_trusted_session("")
         assert "" not in _trusted_sessions
+
+
+class TestLiveTurnPresentationFailure:
+    """Issue #9730: a presentation-side Slack call that raises mid-run must not
+    flip the placeholder to the terminal "🔧 Something went wrong" message nor
+    record a session failure, while the ACP turn is still live and will finish
+    with the correct, complete reply.
+
+    Before the fix, a raise from the progress-card path (``append_task``) — which
+    runs on the first ``tool_call`` event, BEFORE any text has streamed, so
+    ``accumulated`` is still empty — escaped the streaming loop. The four typed
+    ``except`` arms below the loop only catch ``kiro_crew.acp.client`` errors, so
+    a non-ACP raise landed in the generic ``except Exception`` catch-all, which
+    rendered the terminal error and called ``record_failure`` even though the run
+    kept going.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_reactions_enabled(self, monkeypatch):
+        import dataclasses
+
+        from kiro_crew.config.loader import KiroCrewConfig
+
+        _real_load = KiroCrewConfig.load
+
+        def _patched_load():
+            cfg = _real_load()
+            return dataclasses.replace(
+                cfg, slack=dataclasses.replace(cfg.slack, reactions_enabled=True)
+            )
+
+        monkeypatch.setattr(KiroCrewConfig, "load", _patched_load)
+
+    @pytest.mark.asyncio
+    async def test_progress_card_raise_does_not_render_terminal_error(self):
+        # A slack client whose progress-card call raises like a real Slack API
+        # refusal / rate limit — NOT swallowed internally, so it propagates into
+        # the handler's loop exactly as a non-swallowing client would.
+        class RaisingCardSlack(MockSlackClient):
+            def __init__(self):
+                super().__init__()
+                self._stream_enabled = True  # take the Slack streaming path
+
+            async def append_task(self, *a, **kw):
+                raise RuntimeError("ratelimited: chat.appendStream")
+
+        # A FakeSessionManager that records whether the turn was marked failed.
+        class TrackingSessions(FakeSessionManager):
+            def __init__(self, provider):
+                super().__init__(provider)
+                self.record_failure_calls = 0
+                self.record_success_calls = 0
+
+            async def record_failure(self, key):
+                self.record_failure_calls += 1
+                return False
+
+            def record_success(self, key):
+                self.record_success_calls += 1
+
+        slack = RaisingCardSlack()
+        # tool_call FIRST (accumulated empty at the raise), then the real reply.
+        provider = FakeProvider(
+            [
+                LLMEvent(kind="tool_call", title="Running: grep", tool_kind="execute",
+                         tool_purpose="searching the repo"),
+                LLMEvent(kind="text_chunk", text="The answer is 42"),
+            ]
+        )
+        sessions = TrackingSessions(provider)
+
+        await handle_message(slack, sessions, "C1", "do something slow", None, "msg1", "U1")
+
+        # 1. The turn was NOT recorded as a failure — a cosmetic card refusal is
+        #    not the turn dying.
+        assert sessions.record_failure_calls == 0
+        # 2. The terminal error string was never sent to Slack on any surface.
+        all_text = " ".join(
+            str(a[1].get("text") or "")
+            for a in slack.actions
+            if a[0] in ("post", "update", "append_stream", "stop_stream")
+        )
+        assert "Something went wrong" not in all_text, slack.actions
+        # 3. The real reply still reached the user.
+        assert "The answer is 42" in all_text, slack.actions
+        # 4. The turn completed successfully.
+        assert sessions.record_success_calls == 1
