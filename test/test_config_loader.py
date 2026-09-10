@@ -1664,7 +1664,7 @@ class TestEdgeCases:
         assert cfg.memory.embedding_provider == "llama_cpp"
 
     def test_none_provider_coerces_to_llama_cpp(self) -> None:
-        """Embeddings are always-on: a legacy 'none' (previously-disabled) coerces too."""
+        """Embeddings are always-on: a legacy 'none' (the disabled sentinel) coerces too."""
         raw_config: dict = {
             "memory": {"embedding_provider": "none"},
         }
@@ -4394,6 +4394,28 @@ class TestEmptyResponseAutoContinueWiring:
     def test_default_is_true(self) -> None:
         cfg = _load_from_dict({})
         assert cfg.session.empty_response_auto_continue is True
+
+
+class TestEmptyResponseMaxContinuesWiring:
+    """session.empty_response_max_continues: wired, defaulted, and RANGE-clamped
+    — a hand-edited 0 must not disable recovery and a 999 must not arm an
+    unbounded ladder (the ladder's give-up arithmetic trusts this clamp)."""
+
+    def test_persisted_value_survives_load(self) -> None:
+        cfg = _load_from_dict({"session": {"empty_response_max_continues": 3}})
+        assert cfg.session.empty_response_max_continues == 3
+
+    def test_default_is_one(self) -> None:
+        cfg = _load_from_dict({})
+        assert cfg.session.empty_response_max_continues == 1
+
+    def test_below_range_clamps_to_min(self) -> None:
+        cfg = _load_from_dict({"session": {"empty_response_max_continues": 0}})
+        assert cfg.session.empty_response_max_continues == 1
+
+    def test_above_range_clamps_to_max(self) -> None:
+        cfg = _load_from_dict({"session": {"empty_response_max_continues": 999}})
+        assert cfg.session.empty_response_max_continues == 10
 
 
 class TestGitLabHostAllowlist:
