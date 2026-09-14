@@ -29,6 +29,7 @@ import AppHost from '../../components/AppHost'
 import { appIcon } from '../../apps/appIcons'
 import { scrollMemoryKeyFor } from '../../hooks/useScrollMemory'
 import { usePersistedBool } from '../../hooks/usePersistedBool'
+import { useDiffSplit } from '../../hooks/useDiffSplit'
 import { useSidePanelDock } from '../../hooks/useSidePanelDock'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator
@@ -591,7 +592,7 @@ export default function SidePanel({
   // Diff view preferences — persisted; 'mc-diff-split' is shared with the
   // file view's git-diff toggle so split/unified is one app-wide preference.
   const [diffLineNumbers, setDiffLineNumbers] = usePersistedBool('mc-diff-linenums', false)
-  const [diffSideBySide, setDiffSideBySide] = usePersistedBool('mc-diff-split', true)
+  const [diffSideBySide, setDiffSideBySide] = useDiffSplit()
 
   // Resizable width (the actbar grid column is auto-sized, so the panel owns
   // its own width).
@@ -1446,7 +1447,10 @@ function TabChip({ tab, active, onSelect, onClose, closable = true, pinned = fal
       // accessible name + hover tooltip. Harmless (and a nice tooltip) when the
       // label is also shown.
       aria-label={pinned ? tab.title : undefined}
-      title={pinned && !showLabel ? tab.title : undefined}
+      // Labeled chips CSS-truncate at max-w-[240px], so the hover tooltip is
+      // the only way to read a long title in full (e.g. an MCP app's
+      // server/tool identity, #9868). Icon-only chips need it as their name.
+      title={tab.title}
       data-testid={testId}
       // Browser-tab chip: 32px tall, top corners only (8px), bottom edge fused
       // into the panel body. Active = the body's own background (--bg) plus a

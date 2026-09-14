@@ -55,7 +55,7 @@ agent loads only the one it needs.
 | [taskrunner.md](taskrunner.md) | The execution engine that runs a task spec to completion. |
 | [workflows.md](workflows.md) | The dynamic-workflow engine: the frozen `ctx` contract, the event stream, budgets, and the named conformance gates with the test pinning each. |
 | [autopilot.md](autopilot.md) | Plan-driven orchestration and its lifecycle. |
-| [crew-mode.md](crew-mode.md) | Crews: the config record, `select_crew` roster and binding, model and workspace resolution, the Crews UI, and the `"crew"` slot mode's durable multi-topic control plane. |
+| [crew-mode.md](crew-mode.md) | Crews: the config record, `select_crew` roster and binding, model and workspace resolution, the Crews UI, and the record of the retired `"crew"` slot mode (Crew Mode). |
 | [pipeline-conductor.md](pipeline-conductor.md) | The `kirocrew-pipeline-conductor` agent and its skill: the generated spec's permission narrowing, the three deterministic scripts, the patrol cycle, and what the RFC leaves unbuilt. |
 | [persistent-agent-channels.md](persistent-agent-channels.md) | Long-lived channels for multi-agent collaboration. |
 | [channel-history.md](channel-history.md) | The channel history buffer. |
@@ -105,7 +105,7 @@ agent loads only the one it needs.
 | Spec | Subsystem |
 |---|---|
 | [papyrus.md](papyrus.md) | The Papyrus writing app. |
-| [aws-control.md](aws-control.md) | The AWS account portal and S3-backed cloud drive app: accounts, Drive/Library/Backup, consent and confirmation guards, sharing. |
+| [aws-control.md](aws-control.md) | The AWS account portal and S3-backed cloud drive app: accounts, Drive/Library/Backup, consent and confirmation guards, sharing, and the crew container runtime a remote crew runs as. |
 | [command-bar.md](command-bar.md) | The opt-in launcher that replaces quick-search: the overlay seam, the request-free root, ranking and scopes. |
 | [pptx-maker.md](pptx-maker.md) | Deck generation. |
 | [meetings.md](meetings.md) | Meeting capture and summarization. |

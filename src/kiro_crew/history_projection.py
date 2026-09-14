@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, AbstractSet, Any, Literal, overload
 
 from kiro_crew.atomic_write import atomic_write, replace_with_retry
+from kiro_crew.chat_attachments import (
+    purge_staged_attachments,
+    restore_staged_attachments,
+    stage_attachments_removal,
+)
 from kiro_crew.history_cache import _FileChangeCacheEntry
 from kiro_crew.jsonl_util import bounded_raw_records
 
@@ -1085,7 +1090,7 @@ class TranscriptReadProjection:
                     return cached[2], True
                 with open(path, encoding="utf-8") as handle:
                     first = handle.readline().strip()
-            except OSError:
+            except (OSError, UnicodeError):
                 if attempt + 1 < attempts:
                     self._log._pause_for_transient_retry()
                     continue
@@ -1105,7 +1110,10 @@ class TranscriptReadProjection:
                     data if isinstance(data, dict) and data.get("_type") == "metadata" else {}
                 )
             except json.JSONDecodeError:
-                metadata = {}
+                # A damaged first line cannot establish whether this was a
+                # member session. Keep get_metadata's legacy empty-dict view,
+                # but tell identity-sensitive readers to refuse the operation.
+                return {}, False
             self._log._publish_if_current(
                 self._log._meta_cache,
                 key,
@@ -1217,10 +1225,32 @@ class SessionMetadataProjection:
                         key,
                     )
                     return False
+                # The images this session's messages showed are its content,
+                # served by ``/api/file-raw`` the way the transcript's text is
+                # served by the session view. They leave with the transcript in
+                # three all-or-nothing steps: the attachments directory is moved
+                # aside in ONE rename (a failure aborts with everything intact),
+                # the transcript is unlinked (a failure moves the directory back,
+                # so the retained rows still resolve), and only then are the
+                # staged bytes purged -- nothing references them any more, so a
+                # leftover is an orphan for an operator, never a served image.
+                try:
+                    staged = stage_attachments_removal(path.parent, path.stem)
+                except OSError:
+                    _HISTORY_LOGGER.warning(
+                        "delete_session: cannot move attachments aside for key=%s, not deleting",
+                        key,
+                        exc_info=True,
+                    )
+                    return False
                 try:
                     path.unlink(missing_ok=True)
                 except OSError:
+                    if staged is not None:
+                        restore_staged_attachments(staged, path.parent, path.stem)
                     return False
+                if staged is not None:
+                    purge_staged_attachments(staged)
                 for sidecar in (
                     self._log._summary_cache_path(key),
                     self._log._intent_summary_cache_path(key),
@@ -1335,8 +1365,8 @@ class SessionMetadataProjection:
         only_if_closed_before: float | None = None,
     ) -> None:
         """Remove a stale closed marker with an optional compare-and-clear."""
-        path = self._log._path(key)
         with self._log._locked(key):
+            path = self._log._path(key)
             if not path.exists():
                 return
             previous_mtime = _history_facade()._safe_mtime(path)
